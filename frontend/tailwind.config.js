@@ -8,19 +8,19 @@ export default {
     extend: {
       colors: {
         brand: {
-          50: '#e6e6ff',
-          100: '#ccccff',
-          200: '#9999ff',
-          300: '#6666ff',
-          400: '#3333ff',
-          500: '#0000FF', // Primary Brand Blue
-          600: '#0000cc',
-          700: '#000099',
-          800: '#000066',
-          900: '#000033',
-          dark: '#0A1128',
-          navy: '#001F54',
-          accent: '#1D4ED8',
+          50: '#eef2ff',
+          100: '#e0e7ff',
+          200: '#c7d2fe',
+          300: '#a5b4fc',
+          400: '#818cf8',
+          500: '#3b82f6', // Modern Vibrant Blue
+          600: '#2563eb', // Primary Corporate Blue
+          700: '#1d4ed8',
+          800: '#1e40af',
+          900: '#1e3a8a',
+          dark: '#0B0F19',
+          navy: '#0F172A',
+          accent: '#06B6D4',
         },
         surface: {
           bg: '#F8FAFC',
