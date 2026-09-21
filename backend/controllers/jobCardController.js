@@ -179,6 +179,7 @@ export const createJobCard = async (req, res) => {
     // Update appointment status history
     if (jobCard.appointment) {
       await Appointment.findByIdAndUpdate(jobCard.appointment, {
+        ...(jobCard.assignedTechnician ? { assignedTechnician: jobCard.assignedTechnician } : {}),
         $push: {
           statusHistory: {
             status: 'approved',
@@ -289,6 +290,7 @@ export const updateJobCardStatus = async (req, res) => {
       if (jobCard.appointment) {
         await Appointment.findByIdAndUpdate(jobCard.appointment, {
           status: 'completed',
+          ...(jobCard.assignedTechnician ? { assignedTechnician: jobCard.assignedTechnician } : {}),
           $push: {
             statusHistory: {
               status: 'completed',
@@ -626,7 +628,14 @@ export const assignTechnician = async (req, res) => {
       jobCard.serviceBay = serviceBay;
     }
 
-    if (assignedTechnician) jobCard.assignedTechnician = assignedTechnician;
+    if (assignedTechnician) {
+      jobCard.assignedTechnician = assignedTechnician;
+      if (jobCard.appointment) {
+        await Appointment.findByIdAndUpdate(jobCard.appointment, {
+          assignedTechnician: assignedTechnician,
+        }).catch(() => {});
+      }
+    }
 
     await jobCard.save();
 

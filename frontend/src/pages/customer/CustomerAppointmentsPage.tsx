@@ -247,11 +247,20 @@ export const CustomerAppointmentsPage: React.FC = () => {
       if (apt.status === 'approved' || apt.status === 'rescheduled') return 'To be Assigned';
       return '—';
     }
-    if (tech.user?.firstName) {
-      return `${tech.user.firstName} ${tech.user.lastName ? tech.user.lastName.charAt(0) + '.' : ''}`.trim();
-    }
-    if (tech.firstName) {
-      return `${tech.firstName} ${tech.lastName ? tech.lastName.charAt(0) + '.' : ''}`.trim();
+
+    const capitalize = (s?: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+
+    if (typeof tech === 'object') {
+      if (tech.user?.firstName) {
+        const first = capitalize(tech.user.firstName);
+        const last = capitalize(tech.user.lastName);
+        return `${first} ${last}`.trim();
+      }
+      if (tech.firstName) {
+        const first = capitalize(tech.firstName);
+        const last = capitalize(tech.lastName);
+        return `${first} ${last}`.trim();
+      }
     }
     return 'Assigned Technician';
   };

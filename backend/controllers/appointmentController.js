@@ -2,6 +2,7 @@ import Appointment from '../models/Appointment.js';
 import Customer from '../models/Customer.js';
 import Employee from '../models/Employee.js';
 import Notification from '../models/Notification.js';
+import JobCard from '../models/JobCard.js';
 
 export const getAppointments = async (req, res) => {
   try {
@@ -76,20 +77,38 @@ export const getAppointments = async (req, res) => {
       Appointment.countDocuments(query),
     ]);
 
-    console.log('Found appointments:', appointments.length);
-    
-    // Log technician data for debugging
-    appointments.forEach((apt, index) => {
-      if (index < 2) { // Log first 2 appointments
-        console.log(`Appointment ${apt.appointmentNumber}:`, {
-          status: apt.status,
-          hasTechnician: !!apt.assignedTechnician,
-          technicianId: apt.assignedTechnician?._id,
-          technicianUser: apt.assignedTechnician?.user,
-          technicianName: apt.assignedTechnician?.user?.firstName
+    // For any appointments that do not have an assignedTechnician populated, check linked JobCard
+    const missingTechAptIds = appointments
+      .filter((a) => !a.assignedTechnician)
+      .map((a) => a._id);
+
+    if (missingTechAptIds.length > 0) {
+      const linkedJobCards = await JobCard.find({
+        appointment: { $in: missingTechAptIds },
+        assignedTechnician: { $exists: true, $ne: null },
+      }).populate({
+        path: 'assignedTechnician',
+        populate: { path: 'user', select: 'firstName lastName' },
+      });
+
+      if (linkedJobCards.length > 0) {
+        const jcMap = new Map();
+        linkedJobCards.forEach((jc) => {
+          if (jc.appointment && jc.assignedTechnician) {
+            jcMap.set(jc.appointment.toString(), jc.assignedTechnician);
+          }
         });
+
+        for (const apt of appointments) {
+          if (!apt.assignedTechnician && jcMap.has(apt._id.toString())) {
+            const tech = jcMap.get(apt._id.toString());
+            apt.assignedTechnician = tech;
+            // Backfill in database
+            Appointment.findByIdAndUpdate(apt._id, { assignedTechnician: tech._id || tech }).catch(() => {});
+          }
+        }
       }
-    });
+    }
 
     res.status(200).json({
       success: true,
@@ -225,6 +244,19 @@ export const getAppointmentById = async (req, res) => {
       .populate({ path: 'assignedTechnician', populate: { path: 'user', select: 'firstName lastName' } });
 
     if (!appointment) return res.status(404).json({ success: false, message: 'Appointment not found' });
+
+    if (!appointment.assignedTechnician) {
+      const linkedJc = await JobCard.findOne({
+        appointment: appointment._id,
+        assignedTechnician: { $exists: true, $ne: null },
+      }).populate({
+        path: 'assignedTechnician',
+        populate: { path: 'user', select: 'firstName lastName' },
+      });
+      if (linkedJc?.assignedTechnician) {
+        appointment.assignedTechnician = linkedJc.assignedTechnician;
+      }
+    }
 
     res.status(200).json({ success: true, data: appointment });
   } catch (error) {
