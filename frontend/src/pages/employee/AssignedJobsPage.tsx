@@ -34,9 +34,13 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   inspection_complete: { label: 'Inspection Complete', color: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-200', dotColor: 'bg-cyan-500' },
   repair_started: { label: 'Repair Started', color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-200', dotColor: 'bg-orange-500' },
   waiting_for_parts: { label: 'Waiting for Parts', color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200', dotColor: 'bg-purple-500' },
+  repair_in_progress: { label: 'Repair In Progress', color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200', dotColor: 'bg-blue-500' },
   testing: { label: 'Testing', color: 'text-yellow-600', bg: 'bg-yellow-50', border: 'border-yellow-200', dotColor: 'bg-yellow-500' },
   work_complete: { label: 'Work Complete', color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200', dotColor: 'bg-green-500' },
   road_test_pending: { label: 'Road Test Pending', color: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-200', dotColor: 'bg-pink-500' },
+  ready_for_delivery: { label: 'Ready for Delivery', color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200', dotColor: 'bg-blue-500' },
+  delivered: { label: 'Delivered', color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200', dotColor: 'bg-green-500' },
+  cancelled: { label: 'Cancelled', color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200', dotColor: 'bg-red-500' },
 };
 
 const PRIORITY_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; hex: string }> = {
@@ -218,7 +222,10 @@ export const AssignedJobsPage: React.FC = () => {
       ) : (
         <div className="space-y-4">
           {paginatedJobs.map((job) => {
-            const statusCfg = STATUS_CONFIG[job.status] || STATUS_CONFIG.pending;
+            const statusCfg = STATUS_CONFIG[job.status] || {
+              ...STATUS_CONFIG.pending,
+              label: job.status ? job.status.replace(/_/g, ' ').replace(/\b\w/g, (letter: string) => letter.toUpperCase()) : 'Unknown',
+            };
             const priorityCfg = PRIORITY_CONFIG[job.priority?.toLowerCase()] || PRIORITY_CONFIG.low;
             
             return (

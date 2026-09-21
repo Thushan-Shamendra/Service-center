@@ -1,7 +1,7 @@
 import api from './axiosConfig';
 
 export const invoiceApi = {
-  getInvoices: async (params?: { page?: number; limit?: number; status?: string; paymentStatus?: string; search?: string; jobCardId?: string; customer?: string }) => {
+  getInvoices: async (params?: { page?: number; limit?: number; status?: string; paymentStatus?: string; search?: string; jobCardId?: string; jobCard?: string; customer?: string }) => {
     const response = await api.get('/invoices', { params });
     return response.data;
   },
@@ -34,9 +34,12 @@ export const invoiceApi = {
   // Payment operations
   recordPayment: async (invoiceId: string, data: {
     amount: number;
-    paymentMethod: 'cash' | 'card' | 'bank_transfer';
+    paymentMethod: 'cash' | 'card' | 'bank_transfer' | 'cheque';
     referenceNumber?: string;
-    paymentDate: string;
+    paymentDate?: string;
+    notes?: string;
+    bankDetails?: { chequeNumber?: string; chequeDate?: string | Date; bankName?: string };
+    cardDetails?: { lastFourDigits?: string; cardType?: string };
   }) => {
     const response = await api.post(`/invoices/${invoiceId}/payments`, data);
     return response.data;

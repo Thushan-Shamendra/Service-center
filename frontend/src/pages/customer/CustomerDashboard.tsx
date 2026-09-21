@@ -23,6 +23,7 @@ import {
   X,
   XCircle,
   RefreshCw,
+  FileText,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
@@ -130,6 +131,13 @@ export const CustomerDashboard: React.FC = () => {
           >
             <ShieldCheck className="w-5 h-5 mb-1.5 group-hover:scale-110 transition-transform" />
             <span className="text-xs font-bold">Track Status</span>
+          </Link>
+          <Link
+            to="/customer/quotations"
+            className="flex flex-col items-center justify-center p-3.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition-all text-center group"
+          >
+            <FileText className="w-5 h-5 mb-1.5 group-hover:scale-110 transition-transform" />
+            <span className="text-xs font-bold">Quotations</span>
           </Link>
           <Link
             to="/customer/history"

@@ -78,6 +78,7 @@ export const login = async (req, res) => {
         mobile: user.mobile,
         profilePhoto: user.profilePhoto,
         isActive: user.isActive,
+        createdAt: user.createdAt,
         profile,
       },
     });
@@ -115,6 +116,7 @@ export const getMe = async (req, res) => {
         profilePhoto: user.profilePhoto,
         isActive: user.isActive,
         lastLogin: user.lastLogin,
+        createdAt: user.createdAt,
         profile,
       },
     });

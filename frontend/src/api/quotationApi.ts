@@ -21,6 +21,11 @@ export const quotationApi = {
     return response.data;
   },
 
+  submitQuotation: async (id: string) => {
+    const response = await api.put('/quotations/' + id + '/submit');
+    return response.data;
+  },
+
   approveQuotation: async (id: string, payload: { approvedBy: string; remarks?: string }) => {
     const response = await api.put(`/quotations/${id}/approve`, payload);
     return response.data;

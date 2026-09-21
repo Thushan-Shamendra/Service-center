@@ -52,6 +52,7 @@ import { QuotationsPage } from '../pages/manager/QuotationsPage';
 import { GenerateQuotationPage } from '../pages/manager/GenerateQuotationPage';
 import { QuotationDetailsPage } from '../pages/manager/QuotationDetailsPage';
 import { InvoicesPage } from '../pages/manager/InvoicesPage';
+import { ManagerPaymentsPage } from '../pages/manager/ManagerPaymentsPage';
 import { CreateInvoicePage } from '../pages/manager/CreateInvoicePage';
 import { InventoryUsagePage } from '../pages/manager/InventoryUsagePage';
 import { PartsRequestsPage } from '../pages/manager/PartsRequestsPage';
@@ -126,6 +127,7 @@ import { CustomerNotificationsPage } from '../pages/customer/CustomerNotificatio
 import { CustomerReviewsPage } from '../pages/customer/CustomerReviewsPage';
 import { CustomerAccountPage } from '../pages/customer/CustomerAccountPage';
 import { CustomerVehiclesPage } from '../pages/customer/CustomerVehiclesPage';
+import { CustomerQuotationsPage } from '../pages/customer/CustomerQuotationsPage';
 
 const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
   <div className="bg-white rounded-2xl p-8 border border-slate-100 shadow-card text-center my-4">
@@ -233,6 +235,7 @@ export const AppRoutes: React.FC = () => {
               <Route path="technicians" element={<TechnicianWorkloadPage />} />
               <Route path="quotations" element={<QuotationsPage />} />
               <Route path="quotations/new" element={<GenerateQuotationPage />} />
+              <Route path="quotations/:quotationId/edit" element={<GenerateQuotationPage />} />
               <Route path="quotations/:quotationId" element={<QuotationDetailsPage />} />
               <Route path="invoices" element={<InvoicesPage />} />
               <Route path="inventory-usage" element={<InventoryUsagePage />} />
@@ -240,7 +243,7 @@ export const AppRoutes: React.FC = () => {
               <Route path="parts-requests/:requestId" element={<PartsRequestsPage />} />
               <Route path="invoices/new" element={<CreateInvoicePage />} />
               <Route path="invoices/:id" element={<InvoicesPage />} />
-              <Route path="payments" element={<InvoicesPage />} />
+              <Route path="payments" element={<ManagerPaymentsPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
               <Route path="notifications/send" element={<SendNotificationPage />} />
               <Route path="notifications/:notificationId" element={<NotificationDetailsPage />} />
@@ -342,6 +345,14 @@ export const AppRoutes: React.FC = () => {
       />
       <Route
         path="/employee/request-parts-form/:jobCardId?"
+        element={
+          <ProtectedRoute allowedRoles={['employee']}>
+            <RequestPartsFormPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/employee/request-parts/:jobCardId"
         element={
           <ProtectedRoute allowedRoles={['employee']}>
             <RequestPartsFormPage />
@@ -501,6 +512,14 @@ export const AppRoutes: React.FC = () => {
         }
       />
       <Route
+        path="/employee/final-inspection/:jobCardId"
+        element={
+          <ProtectedRoute allowedRoles={['employee']}>
+            <FinalInspectionReportPreviewPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/employee/profile"
         element={
           <ProtectedRoute allowedRoles={['employee']}>
@@ -567,6 +586,7 @@ export const AppRoutes: React.FC = () => {
               <Route path="vehicles" element={<CustomerVehiclesPage />} />
               <Route path="appointments" element={<CustomerAppointmentsPage />} />
               <Route path="tracking" element={<ServiceTrackerPage />} />
+              <Route path="quotations" element={<CustomerQuotationsPage />} />
               <Route path="history" element={<ServiceHistoryPage />} />
               <Route path="invoices" element={<CustomerInvoicesPage />} />
               <Route path="notifications" element={<CustomerNotificationsPage />} />

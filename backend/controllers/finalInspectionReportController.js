@@ -1,13 +1,16 @@
+import mongoose from 'mongoose';
 import FinalInspectionReport from '../models/FinalInspectionReport.js';
 import JobCard from '../models/JobCard.js';
 import SparePartsRequest from '../models/SparePartsRequest.js';
 import RoadTest from '../models/RoadTest.js';
+import Employee from '../models/Employee.js';
 
 // Get final inspection reports for a technician
 export const getFinalInspectionReports = async (req, res) => {
   try {
     const { jobCard } = req.query;
-    const filter = { technician: req.user.id };
+    const employee = await Employee.findOne({ user: req.user.id });
+    const filter = { technician: { $in: [req.user.id, ...(employee ? [employee._id] : [])] } };
     
     if (jobCard) filter.jobCard = jobCard;
 
@@ -30,12 +33,63 @@ export const getFinalInspectionReports = async (req, res) => {
   }
 };
 
-// Get final inspection report by ID
+// Get final inspection report by ID (supports report _id, jobCard ID, or reportId string)
 export const getFinalInspectionReportById = async (req, res) => {
   try {
-    const report = await FinalInspectionReport.findById(req.params.id)
-      .populate('jobCard')
-      .populate('technician', 'firstName lastName');
+    const { id } = req.params;
+    let report = null;
+
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      // 1. Try finding by report _id
+      report = await FinalInspectionReport.findById(id)
+        .populate({
+          path: 'jobCard',
+          populate: [
+            { path: 'vehicle' },
+            { path: 'customer', populate: { path: 'user', select: 'firstName lastName mobile email' } },
+            { path: 'assignedTechnician', populate: { path: 'user', select: 'firstName lastName' } }
+          ]
+        })
+        .populate({
+          path: 'technician',
+          populate: { path: 'user', select: 'firstName lastName mobile email' }
+        });
+
+      // 2. If not found, try finding by jobCard id
+      if (!report) {
+        report = await FinalInspectionReport.findOne({ jobCard: id })
+          .sort({ createdAt: -1 })
+          .populate({
+            path: 'jobCard',
+            populate: [
+              { path: 'vehicle' },
+              { path: 'customer', populate: { path: 'user', select: 'firstName lastName mobile email' } },
+              { path: 'assignedTechnician', populate: { path: 'user', select: 'firstName lastName' } }
+            ]
+          })
+          .populate({
+            path: 'technician',
+            populate: { path: 'user', select: 'firstName lastName mobile email' }
+          });
+      }
+    }
+
+    // 3. If still not found, try finding by reportId string (e.g. FIN-2026-...)
+    if (!report) {
+      report = await FinalInspectionReport.findOne({ reportId: id })
+        .populate({
+          path: 'jobCard',
+          populate: [
+            { path: 'vehicle' },
+            { path: 'customer', populate: { path: 'user', select: 'firstName lastName mobile email' } },
+            { path: 'assignedTechnician', populate: { path: 'user', select: 'firstName lastName' } }
+          ]
+        })
+        .populate({
+          path: 'technician',
+          populate: { path: 'user', select: 'firstName lastName mobile email' }
+        });
+    }
 
     if (!report) {
       return res.status(404).json({
@@ -60,12 +114,28 @@ export const getFinalInspectionReportById = async (req, res) => {
 // Create new final inspection report
 export const createFinalInspectionReport = async (req, res) => {
   try {
+    const mechanicRemarks = typeof req.body.mechanicRemarks === 'string' ? req.body.mechanicRemarks.trim() : '';
+    const fields = {};
+    if (!mechanicRemarks) fields.mechanicRemarks = 'Please enter mechanic remarks';
+    else if (mechanicRemarks.length > 500) fields.mechanicRemarks = 'Mechanic remarks must be 500 characters or fewer';
+    if (Object.keys(fields).length) {
+      return res.status(400).json({ success: false, message: fields.mechanicRemarks, errors: fields });
+    }
+    const hours = req.body.reportSummary?.totalHours;
+    if (hours !== undefined && (typeof hours !== 'number' || !Number.isFinite(hours) || hours < 0)) {
+      return res.status(400).json({ success: false, message: 'Total hours must be a non-negative number' });
+    }
     const jobCard = await JobCard.findById(req.body.jobCard);
     if (!jobCard) {
       return res.status(404).json({
         success: false,
         message: 'Job card not found',
       });
+    }
+
+    const employee = await Employee.findOne({ user: req.user.id });
+    if (!employee) {
+      return res.status(400).json({ success: false, message: 'Your account does not have an employee profile. Please contact your manager.' });
     }
 
     // Generate report ID
@@ -78,9 +148,22 @@ export const createFinalInspectionReport = async (req, res) => {
     const reportData = {
       ...req.body,
       reportId,
-      technician: req.user.id,
+      technician: employee._id,
+      mechanicRemarks,
       completionDate: new Date(),
     };
+
+    // Accept both report line items and the populated job card parts used by the form.
+    if (Array.isArray(req.body.partsReplaced)) {
+      reportData.partsReplaced = req.body.partsReplaced.map(part => ({
+        itemName: part.itemName ?? part.name ?? part.item?.name,
+        partNumber: part.partNumber ?? part.item?.itemCode,
+        quantity: part.quantity,
+        status: part.status,
+        cost: part.cost ?? part.total ?? 0,
+        serialNumber: part.serialNumber,
+      }));
+    }
 
     // Calculate totals if provided in report summary
     if (req.body.reportSummary) {
@@ -125,6 +208,10 @@ export const createFinalInspectionReport = async (req, res) => {
       data: report,
     });
   } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.fromEntries(Object.entries(error.errors).map(([field, issue]) => [field, issue.message]));
+      return res.status(400).json({ success: false, message: Object.values(errors).join('; '), errors });
+    }
     console.error('Error creating final inspection report:', error);
     res.status(500).json({
       success: false,
@@ -147,7 +234,8 @@ export const updateFinalInspectionReport = async (req, res) => {
     }
 
     // Check ownership
-    if (report.technician.toString() !== req.user.id) {
+    const employee = await Employee.findOne({ user: req.user.id });
+    if (report.technician.toString() !== req.user.id && report.technician.toString() !== employee?._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this report',
@@ -187,7 +275,10 @@ export const getReportDataForJobCard = async (req, res) => {
     const { jobCardId } = req.params;
 
     const [jobCard, partsRequests, roadTest] = await Promise.all([
-      JobCard.findById(jobCardId).populate('vehicle', 'make model year registrationNumber').populate('customer', 'name'),
+      JobCard.findById(jobCardId)
+        .populate('vehicle')
+        .populate({ path: 'customer', populate: { path: 'user', select: 'firstName lastName mobile email' } })
+        .populate({ path: 'assignedTechnician', populate: { path: 'user', select: 'firstName lastName' } }),
       SparePartsRequest.find({ jobCard: jobCardId, status: 'issued' }).populate('item', 'itemName itemCode'),
       RoadTest.findOne({ jobCard: jobCardId }).sort({ createdAt: -1 }).populate('technician', 'name'),
     ]);

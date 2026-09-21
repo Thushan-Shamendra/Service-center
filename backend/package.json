@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "kill-port": "npx -y kill-port 5000",
     "seed": "node utils/seedAdmin.js",
     "fix-vehicle-ids": "node utils/fixVehicleIds.js",
     "cleanup-vehicle-index": "node utils/cleanupVehicleIndex.js",

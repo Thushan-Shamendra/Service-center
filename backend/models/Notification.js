@@ -19,6 +19,7 @@ const notificationSchema = new mongoose.Schema(
         'testing_started', 'work_completed', 'road_test_pending',
         'ready_for_pickup', 'vehicle_delivered', 'job_cancelled', 'status_changed',
         'quotation_submitted', 'quotation_approved', 'quotation_rejected',
+        'payment_submitted', 'payment_pending', 'payment_verified', 'payment_rejected', 'payment_refunded',
       ],
       default: 'general',
     },

@@ -1,13 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { FileText, Edit, X, Check, Printer, Mail, RefreshCw, AlertTriangle, Lock } from 'lucide-react';
+import { FileText, Edit, X, Check, Printer, RefreshCw, Send, Phone, Mail, Clock, ShieldCheck } from 'lucide-react';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { ErrorState } from '../../components/ui/ErrorState';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { formatLKR, formatDate } from '../../utils/formatters';
 import { quotationApi } from '../../api/quotationApi';
 import toast from 'react-hot-toast';
-import dayjs from 'dayjs';
 
 interface Quotation {
   id: string;
@@ -16,15 +15,16 @@ interface Quotation {
   customer: any;
   vehicle: any;
   jobCard: any;
-  amount: number;
-  status: 'draft' | 'review' | 'approved' | 'rejected' | 'converted' | 'awaiting_customer';
+  grandTotal: number;
+  taxAmount: number;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'converted' | 'awaiting_customer';
   createdAt: string;
   validUntil?: string;
-  parts: any[];
+  items: any[];
   laborCharge: number;
   estimatedHours: number;
   discount: number;
-  remarks: string;
+  notes: string;
   approvedBy?: string;
   approvedAt?: string;
   rejectionReason?: string;
@@ -38,11 +38,12 @@ export const QuotationDetailsPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [showConvertModal, setShowConvertModal] = useState(false);
-  const [varianceReason, setVarianceReason] = useState('');
   const [confirmApproval, setConfirmApproval] = useState(false);
 
   const fetchQuotation = async () => {
@@ -72,23 +73,33 @@ export const QuotationDetailsPage: React.FC = () => {
 
   const getCustomerName = () => {
     const customer = quotation?.customer;
-    if (typeof customer === 'object' && customer.user) {
+    if (customer && typeof customer === 'object' && customer.user) {
       return `${customer.user.firstName} ${customer.user.lastName}`;
     }
     return 'Unknown';
   };
 
+  const getCustomerMobile = () => {
+    const customer = quotation?.customer;
+    return customer?.user?.mobile || customer?.phone || 'N/A';
+  };
+
+  const getCustomerEmail = () => {
+    const customer = quotation?.customer;
+    return customer?.user?.email || customer?.email || 'N/A';
+  };
+
   const getVehicleInfo = () => {
     const vehicle = quotation?.vehicle;
-    if (typeof vehicle === 'object') {
+    if (vehicle && typeof vehicle === 'object') {
       return `${vehicle.make} ${vehicle.model} • ${vehicle.registrationNumber}`;
     }
     return 'Unknown';
   };
 
   const calculatePartsTotal = () => {
-    if (!quotation?.parts) return 0;
-    return quotation.parts.reduce((sum, part) => sum + part.subtotal, 0);
+    if (!quotation?.items) return 0;
+    return quotation.items.reduce((sum, part) => sum + part.total, 0);
   };
 
   const calculateLaborCost = () => {
@@ -97,12 +108,32 @@ export const QuotationDetailsPage: React.FC = () => {
   };
 
   const calculateGrandTotal = () => {
-    return calculatePartsTotal() + calculateLaborCost() - (quotation?.discount || 0);
+    return quotation?.grandTotal || 0;
+  };
+
+  const handleSendToCustomer = async () => {
+    if (!quotation) return;
+    setIsSubmitting(true);
+    try {
+      const mongoId = quotation._id || quotation.id;
+      const res = await quotationApi.submitQuotation(mongoId);
+      if (res.success) {
+        toast.success(res.message || `Quotation submitted to ${getCustomerName()}!`);
+        setShowSubmitModal(false);
+        fetchQuotation();
+      } else {
+        toast.error(res.message || 'Failed to submit quotation to customer');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Error submitting quotation to customer');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleApprove = async () => {
     if (!confirmApproval) {
-      toast.error('Please confirm that you have reviewed the quotation');
+      toast.error('Please confirm customer approval');
       return;
     }
     
@@ -111,12 +142,12 @@ export const QuotationDetailsPage: React.FC = () => {
     try {
       const mongoId = quotation._id || quotation.id;
       const res = await quotationApi.approveQuotation(mongoId, {
-        approvedBy: 'Manager',
-        remarks: 'Approved by Manager',
+        approvedBy: `${getCustomerName()} (Approved via Manager)`,
+        remarks: 'Customer approval recorded by manager',
       });
       
       if (res.success) {
-        toast.success('Quotation approved successfully');
+        toast.success(`Quotation approved for ${getCustomerName()}!`);
         setShowApproveModal(false);
         fetchQuotation();
       } else {
@@ -154,27 +185,11 @@ export const QuotationDetailsPage: React.FC = () => {
   };
 
   const handleConvertToInvoice = async () => {
-    // Calculate variance
-    const quotedAmount = calculateGrandTotal();
-    const actualParts = 40500;
-    const actualLabor = 16000;
-    const actualAmount = actualParts + actualLabor;
-    const variance = actualAmount - quotedAmount;
-    const variancePercent = ((variance / quotedAmount) * 100).toFixed(2);
-    
-    if (variance > 0 && !varianceReason) {
-      toast.error('Please enter a reason for the variance');
-      return;
-    }
-    
     if (!quotation) return;
     
     try {
       const mongoId = quotation._id || quotation.id;
-      const res = await quotationApi.convertToInvoice(mongoId, {
-        varianceReason: variance > 0 ? varianceReason : undefined,
-        confirmApproval: variance > 0 ? confirmApproval : undefined,
-      });
+      const res = await quotationApi.convertToInvoice(mongoId, {});
       
       if (res.success) {
         toast.success('Quotation converted to invoice');
@@ -193,12 +208,6 @@ export const QuotationDetailsPage: React.FC = () => {
   if (!quotation) return <ErrorState message="Quotation not found" />;
 
   const quotedAmount = calculateGrandTotal();
-  const actualParts = 40500;
-  const actualLabor = 16000;
-  const actualAmount = actualParts + actualLabor;
-  const variance = actualAmount - quotedAmount;
-  const variancePercent = Math.abs((variance / quotedAmount) * 100).toFixed(2);
-  const hasVariance = variance > 0;
 
   return (
     <div className="space-y-6">
@@ -216,6 +225,32 @@ export const QuotationDetailsPage: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-card p-8">
+        {/* Customer Submission Status Alert */}
+        {quotation.status === 'submitted' && (
+          <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-blue-100 text-blue-700 rounded-xl">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-blue-950">
+                  Submitted to Customer: <span className="text-brand-700 font-extrabold">{getCustomerName()}</span>
+                </p>
+                <p className="text-xs text-blue-700 mt-0.5">
+                  Phone: <span className="font-semibold">{getCustomerMobile()}</span> • Email: <span className="font-semibold">{getCustomerEmail()}</span> — Awaiting customer review & approval in Customer Portal.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowSubmitModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white border border-blue-300 text-blue-700 hover:bg-blue-100 rounded-xl text-xs font-semibold shrink-0 transition-colors shadow-xs"
+            >
+              <Send className="w-3.5 h-3.5" /> Resend to Customer
+            </button>
+          </div>
+        )}
+
         {/* Quotation Header */}
         <div className="border-b border-slate-200 pb-6 mb-6">
           <div className="text-center mb-4">
@@ -248,7 +283,7 @@ export const QuotationDetailsPage: React.FC = () => {
         <div className="mb-6">
           <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">CUSTOMER</h3>
           <p className="text-slate-900">{getCustomerName()}</p>
-          <p className="text-slate-600">{quotation.customer?.mobile}</p>
+          <p className="text-slate-600">{quotation.customer?.user?.mobile}</p>
         </div>
 
         <div className="mb-6">
@@ -271,13 +306,13 @@ export const QuotationDetailsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {quotation.parts?.map((part, index) => (
+                {quotation.items?.map((part, index) => (
                   <tr key={index} className="border-b border-slate-100">
-                    <td className="py-2 px-3 text-sm text-slate-900">{part.partName}</td>
+                    <td className="py-2 px-3 text-sm text-slate-900">{part.name}</td>
                     <td className="py-2 px-3 text-sm text-slate-600">{part.quantity}</td>
                     <td className="py-2 px-3 text-sm text-slate-600">{part.unitPrice.toLocaleString()}</td>
-                    <td className="py-2 px-3 text-sm text-slate-600">0</td>
-                    <td className="py-2 px-3 text-sm text-slate-900 font-medium">{part.subtotal.toLocaleString()}</td>
+                    <td className="py-2 px-3 text-sm text-slate-600">{formatLKR(part.discount || 0)}</td>
+                    <td className="py-2 px-3 text-sm text-slate-900 font-medium">{part.total.toLocaleString()}</td>
                   </tr>
                 ))}
                 <tr className="border-b border-slate-100">
@@ -301,8 +336,9 @@ export const QuotationDetailsPage: React.FC = () => {
             </div>
             <div className="flex justify-between">
               <span className="text-slate-600">Discount</span>
-              <span className="text-slate-900">-{quotation.discount.toLocaleString()}</span>
+              <span className="text-slate-900">-{(quotation.discount || 0).toLocaleString()}</span>
             </div>
+            <div className="flex justify-between"><span>Tax</span><span>{formatLKR(quotation.taxAmount || 0)}</span></div>
             <div className="border-t border-slate-300 pt-2 mt-2">
               <div className="flex justify-between font-bold text-lg">
                 <span className="text-slate-900">GRAND TOTAL</span>
@@ -315,7 +351,7 @@ export const QuotationDetailsPage: React.FC = () => {
         {/* Remarks */}
         <div className="mb-6">
           <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">REMARKS</h3>
-          <p className="text-sm text-slate-600">{quotation.remarks}</p>
+          <p className="text-sm text-slate-600">{quotation.notes}</p>
         </div>
 
         {/* Approval Info */}
@@ -345,41 +381,59 @@ export const QuotationDetailsPage: React.FC = () => {
             <>
               <Link
                 to={`/manager/quotations/${quotation._id || quotation.id}/edit`}
-                className="flex items-center gap-2 px-4 py-2 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50"
+                className="flex items-center gap-2 px-4 py-2 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-medium text-sm"
               >
                 <Edit className="w-4 h-4" />
                 Edit
               </Link>
               <button
-                onClick={() => setShowApproveModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700"
+                type="button"
+                onClick={() => setShowSubmitModal(true)}
+                className="flex items-center gap-2 px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-semibold shadow-xs text-sm transition-colors"
               >
-                <Check className="w-4 h-4" />
-                Approve Quotation
+                <Send className="w-4 h-4" />
+                Submit to Customer ({getCustomerName()})
+              </button>
+            </>
+          )}
+          {quotation.status === 'submitted' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowSubmitModal(true)}
+                className="flex items-center gap-2 px-4 py-2 border border-blue-200 text-blue-700 bg-blue-50/50 hover:bg-blue-50 rounded-xl font-medium text-sm transition-colors"
+              >
+                <Send className="w-4 h-4" />
+                Resend to Customer
               </button>
               <button
+                type="button"
+                onClick={() => setShowApproveModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-semibold shadow-xs text-sm transition-colors"
+              >
+                <Check className="w-4 h-4" />
+                Record Customer Approval
+              </button>
+              <button
+                type="button"
                 onClick={() => setShowRejectModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700"
+                className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 font-medium text-sm transition-colors"
               >
                 <X className="w-4 h-4" />
-                Reject
+                Record Customer Rejection
               </button>
             </>
           )}
           
           {quotation.status === 'approved' && (
             <>
-              <button className="flex items-center gap-2 px-4 py-2 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50">
+              <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 font-medium text-sm">
                 <Printer className="w-4 h-4" />
                 Print PDF
               </button>
-              <button className="flex items-center gap-2 px-4 py-2 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50">
-                <Mail className="w-4 h-4" />
-                Email Customer
-              </button>
               <button
                 onClick={() => setShowConvertModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl hover:bg-brand-700"
+                className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl hover:bg-brand-700 font-semibold shadow-xs text-sm"
               >
                 <RefreshCw className="w-4 h-4" />
                 Convert to Invoice
@@ -389,35 +443,118 @@ export const QuotationDetailsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Approve Modal */}
+      {/* Submit to Customer Modal */}
+      {showSubmitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-brand-50 text-brand-600 rounded-2xl">
+                <Send className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">
+                  {quotation.status === 'submitted' ? 'Resend Quotation to Customer' : 'Submit Quotation to Customer'}
+                </h3>
+                <p className="text-xs text-slate-500 font-mono">{quotation.quotationNumber}</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 rounded-2xl p-4 space-y-2 text-xs mb-4 border border-slate-100">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Target Customer:</span>
+                <span className="font-bold text-slate-900">{getCustomerName()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Contact Number:</span>
+                <span className="font-medium text-slate-800">{getCustomerMobile()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Email Address:</span>
+                <span className="font-medium text-slate-800">{getCustomerEmail()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Vehicle:</span>
+                <span className="font-medium text-slate-800">{getVehicleInfo()}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t border-slate-200 text-sm font-bold">
+                <span className="text-slate-700">Quotation Total:</span>
+                <span className="text-brand-600 font-extrabold">{formatLKR(quotedAmount)}</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 mb-6 leading-relaxed">
+              This quotation will be dispatched to <span className="font-bold text-slate-900">{getCustomerName()}</span>. The customer will receive an immediate in-app notification with a link to review, itemize, and approve or decline this estimate directly in their Customer Portal.
+            </p>
+
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => setShowSubmitModal(false)}
+                className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={handleSendToCustomer}
+                className="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-xs transition-colors"
+              >
+                {isSubmitting ? (
+                  'Submitting...'
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    Confirm & Submit to Customer
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Record Customer Approval Modal */}
       {showApproveModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">Approve Quotation</h3>
-            <div className="space-y-2 text-sm mb-4">
-              <p><span className="text-slate-500">Quotation:</span> <span className="ml-2 font-medium">{quotation.quotationNumber}</span></p>
-              <p><span className="text-slate-500">Customer:</span> <span className="ml-2 font-medium">{getCustomerName()}</span></p>
-              <p><span className="text-slate-500">Vehicle:</span> <span className="ml-2 font-medium">{getVehicleInfo()}</span></p>
-              <p><span className="text-slate-500">Quotation Total:</span> <span className="ml-2 font-medium">{formatLKR(quotedAmount)}</span></p>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Record Customer Approval</h3>
+                <p className="text-xs text-slate-500 font-mono">{quotation.quotationNumber}</p>
+              </div>
             </div>
-            <p className="text-sm text-slate-600 mb-4">
-              Once approved, this quotation becomes the approved estimate for the current Job Card.
+            
+            <div className="space-y-2 text-xs mb-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <p><span className="text-slate-500">Customer:</span> <span className="ml-2 font-bold text-slate-900">{getCustomerName()}</span></p>
+              <p><span className="text-slate-500">Vehicle:</span> <span className="ml-2 font-medium text-slate-800">{getVehicleInfo()}</span></p>
+              <p><span className="text-slate-500">Quotation Total:</span> <span className="ml-2 font-bold text-brand-600">{formatLKR(quotedAmount)}</span></p>
+            </div>
+
+            <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+              Use this to record that <span className="font-bold text-slate-900">{getCustomerName()}</span> has approved this quotation verbally (e.g. phone call, in-person at counter) or signed a physical copy.
             </p>
-            <div className="mb-4">
-              <label className="flex items-center gap-2 text-sm">
+
+            <div className="mb-6">
+              <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={confirmApproval}
                   onChange={(e) => setConfirmApproval(e.target.checked)}
-                  className="rounded"
+                  className="rounded border-slate-300 text-brand-600"
                 />
-                <span>I confirm that I have reviewed the quotation.</span>
+                <span>I confirm that the customer has approved this estimate.</span>
               </label>
             </div>
+
             <div className="flex justify-end gap-3">
-              <button onClick={() => setShowApproveModal(false)} className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl">Cancel</button>
-              <button onClick={handleApprove} className="px-4 py-2 bg-brand-600 text-white rounded-xl">
-                <Check className="w-4 h-4 inline mr-2" />
+              <button onClick={() => setShowApproveModal(false)} className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50">Cancel</button>
+              <button onClick={handleApprove} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs">
+                <Check className="w-3.5 h-3.5" />
                 Confirm Approval
               </button>
             </div>
@@ -455,83 +592,13 @@ export const QuotationDetailsPage: React.FC = () => {
       {showConvertModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">
-              {hasVariance ? '⚠ Quotation Variance Detected' : 'Convert Quotation to Invoice'}
-            </h3>
-            
-            <div className="space-y-4 mb-4">
-              <div>
-                <p className="text-sm text-slate-500">QUOTATION</p>
-                <p className="font-medium text-slate-900">{quotation.quotationNumber}</p>
-                <p className="text-sm text-slate-600">Original Quotation</p>
-                <p className="font-bold text-slate-900">{formatLKR(quotedAmount)}</p>
-              </div>
-              
-              <div>
-                <p className="text-sm text-slate-500">ACTUAL COST</p>
-                <p className="text-sm text-slate-600">Actual Parts Used</p>
-                <p className="font-medium text-slate-900">{formatLKR(actualParts)}</p>
-                <p className="text-sm text-slate-600">Actual Labor</p>
-                <p className="font-medium text-slate-900">{formatLKR(actualLabor)}</p>
-                <div className="border-t border-slate-200 mt-2 pt-2">
-                  <p className="text-sm text-slate-600">Final Actual Amount</p>
-                  <p className="font-bold text-slate-900">{formatLKR(actualAmount)}</p>
-                </div>
-              </div>
-              
-              <div className={`p-4 rounded-xl ${hasVariance ? 'bg-rose-50 border border-rose-200' : 'bg-emerald-50 border border-emerald-200'}`}>
-                <p className="text-sm text-slate-500">VARIANCE</p>
-                <p className="font-medium text-slate-900">Original Quotation: {formatLKR(quotedAmount)}</p>
-                <p className="font-medium text-slate-900">Final Amount: {formatLKR(actualAmount)}</p>
-                <p className={`font-bold ${hasVariance ? 'text-rose-600' : 'text-emerald-600'}`}>
-                  Difference: {variance > 0 ? '+' : ''}{formatLKR(variance)}
-                </p>
-                <p className={`font-bold ${hasVariance ? 'text-rose-600' : 'text-emerald-600'}`}>
-                  {variance > 0 ? '+' : ''}{variancePercent}%
-                </p>
-                {hasVariance ? (
-                  <p className="text-sm text-rose-800 mt-2">
-                    🔴 Final amount exceeds the approved quotation. Manager confirmation is required.
-                  </p>
-                ) : (
-                  <p className="text-sm text-emerald-800 mt-2">
-                    🟢 Final amount is within the approved quotation.
-                  </p>
-                )}
-              </div>
-              
-              {hasVariance && (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Reason for Variance *</label>
-                  <textarea
-                    value={varianceReason}
-                    onChange={(e) => setVarianceReason(e.target.value)}
-                    rows={3}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-xl"
-                    placeholder="Additional engine component required after inspection..."
-                  />
-                </div>
-              )}
-              
-              {hasVariance && (
-                <div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={confirmApproval}
-                      onChange={(e) => setConfirmApproval(e.target.checked)}
-                      className="rounded"
-                    />
-                    <span>I confirm and approve the additional cost.</span>
-                  </label>
-                </div>
-              )}
-            </div>
-            
+            <h3 className="text-lg font-bold text-slate-900 mb-4">Convert Quotation to Invoice</h3>
+            <p className="mb-4 text-slate-600">Create an invoice using the approved items, labor, discount and tax from {quotation.quotationNumber}.</p>
+            <p className="mb-6 text-xl font-bold">Invoice total: {formatLKR(quotedAmount)}</p>
             <div className="flex justify-end gap-3">
               <button onClick={() => setShowConvertModal(false)} className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl">Cancel</button>
               <button onClick={handleConvertToInvoice} className="px-4 py-2 bg-brand-600 text-white rounded-xl">
-                {hasVariance ? 'Confirm & Convert to Invoice' : 'Convert to Invoice'}
+                Convert to Invoice
               </button>
             </div>
           </div>

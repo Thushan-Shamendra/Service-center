@@ -1,6 +1,14 @@
 import api from './axiosConfig';
 
 export const finalInspectionReportApi = {
+  uploadEvidence: async (file: File) => {
+    const data = new FormData();
+    data.append('file', file);
+    const response = await api.post('/final-inspection-reports/evidence', data, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
   getFinalInspectionReports: async (params?: any) => {
     const response = await api.get('/final-inspection-reports', { params });
     return response.data;

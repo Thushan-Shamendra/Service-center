@@ -1,48 +1,81 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Receipt, Clock, AlertTriangle, DollarSign, X, Search, Plus } from 'lucide-react';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Receipt, Clock, AlertTriangle, DollarSign, X, Search, Plus, Eye, CreditCard } from 'lucide-react';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { ErrorState } from '../../components/ui/ErrorState';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { formatLKR, formatDate } from '../../utils/formatters';
 import { invoiceApi } from '../../api/invoiceApi';
+import { InvoiceDetailsModal } from '../../components/manager/InvoiceDetailsModal';
 import toast from 'react-hot-toast';
 
 interface Invoice {
-  id: string;
+  id?: string;
   _id?: string;
   invoiceNumber: string;
   customer: any;
   vehicle: any;
   jobCard: any;
-  amount: number;
-  status: 'draft' | 'review' | 'approved' | 'rejected';
+  items?: Array<{
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    discount?: number;
+    total: number;
+  }>;
+  laborCharges?: Array<{
+    description: string;
+    hours: number;
+    ratePerHour: number;
+    total: number;
+  }>;
+  subtotal?: number;
+  discount?: number;
+  taxRate?: number;
+  taxAmount?: number;
+  grandTotal: number;
+  amount?: number;
+  amountPaid: number;
+  paidAmount?: number;
+  outstandingBalance: number;
+  status: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
   paymentStatus: 'unpaid' | 'partially_paid' | 'paid';
-  paidAmount: number;
   createdAt: string;
   dueDate?: string;
 }
 
 export const InvoicesPage: React.FC = () => {
+  const { id: urlInvoiceId } = useParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const jobCardParam = searchParams.get('jobCard');
+
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  const [searchQuery, setSearchQuery] = useState('');
+
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(urlInvoiceId || null);
+
+  const [searchQuery, setSearchQuery] = useState(jobCardParam || '');
   const [statusFilter, setStatusFilter] = useState('all');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('today');
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
 
   const [stats, setStats] = useState({
     total: 0,
-    pendingApproval: 0,
+    draft: 0,
     partiallyPaid: 0,
     paid: 0,
     unpaid: 0,
     todayRevenue: 0,
     outstandingBalance: 0,
   });
+
+  useEffect(() => {
+    if (urlInvoiceId) {
+      setSelectedInvoiceId(urlInvoiceId);
+    }
+  }, [urlInvoiceId]);
 
   const fetchInvoices = async () => {
     setIsLoading(true);
@@ -52,22 +85,31 @@ export const InvoicesPage: React.FC = () => {
       const res = await invoiceApi.getInvoices({ limit: 100 });
       
       if (res.success) {
-        setInvoices(res.data || []);
+        const invoiceData: Invoice[] = res.data || [];
+        setInvoices(invoiceData);
         
         // Calculate stats
-        const invoiceData = res.data || [];
+        const now = new Date();
+        const todayRevenue = invoiceData
+          .filter((i: Invoice) => {
+            if (!i.createdAt) return false;
+            const created = new Date(i.createdAt);
+            const isToday = created.toDateString() === now.toDateString();
+            return isToday && (i.paymentStatus === 'paid' || (i.amountPaid || 0) > 0);
+          })
+          .reduce((sum: number, i: Invoice) => sum + (i.amountPaid ?? i.grandTotal ?? i.amount ?? 0), 0);
+
+        const outstandingBalance = invoiceData
+          .reduce((sum: number, i: Invoice) => sum + (i.outstandingBalance ?? Math.max(0, (i.grandTotal ?? i.amount ?? 0) - (i.amountPaid ?? i.paidAmount ?? 0))), 0);
+
         setStats({
           total: invoiceData.length,
-          pendingApproval: invoiceData.filter((i: Invoice) => i.status === 'review').length,
+          draft: invoiceData.filter((i: Invoice) => i.status === 'draft').length,
           partiallyPaid: invoiceData.filter((i: Invoice) => i.paymentStatus === 'partially_paid').length,
           paid: invoiceData.filter((i: Invoice) => i.paymentStatus === 'paid').length,
           unpaid: invoiceData.filter((i: Invoice) => i.paymentStatus === 'unpaid').length,
-          todayRevenue: invoiceData
-            .filter((i: Invoice) => i.paymentStatus === 'paid' && new Date(i.createdAt).toDateString() === new Date().toDateString())
-            .reduce((sum: number, i: Invoice) => sum + i.amount, 0),
-          outstandingBalance: invoiceData
-            .filter((i: Invoice) => i.paymentStatus !== 'paid')
-            .reduce((sum: number, i: Invoice) => sum + (i.amount - i.paidAmount), 0),
+          todayRevenue,
+          outstandingBalance,
         });
       } else {
         setError(res.message || 'Failed to load invoices');
@@ -87,25 +129,33 @@ export const InvoicesPage: React.FC = () => {
 
   const getCustomerName = (invoice: Invoice) => {
     const customer = invoice.customer;
-    if (typeof customer === 'object' && customer.user) {
-      return `${customer.user.firstName} ${customer.user.lastName}`;
+    if (customer && typeof customer === 'object') {
+      if (customer.user) {
+        return `${customer.user.firstName || ''} ${customer.user.lastName || ''}`.trim() || 'Unknown';
+      }
+      if (customer.firstName) {
+        return `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || 'Unknown';
+      }
+      if (customer.name) return customer.name;
     }
     return 'Unknown';
   };
 
   const getVehicleReg = (invoice: Invoice) => {
     const vehicle = invoice.vehicle;
-    if (typeof vehicle === 'object') {
-      return vehicle.registrationNumber;
+    if (vehicle && typeof vehicle === 'object') {
+      return vehicle.registrationNumber || (vehicle.make ? `${vehicle.make} ${vehicle.model || ''}`.trim() : 'N/A');
     }
+    if (typeof vehicle === 'string') return vehicle;
     return 'N/A';
   };
 
   const getJobCardNumber = (invoice: Invoice) => {
     const jobCard = invoice.jobCard;
-    if (typeof jobCard === 'object') {
-      return jobCard.jobCardNumber;
+    if (jobCard && typeof jobCard === 'object') {
+      return jobCard.jobCardNumber || 'N/A';
     }
+    if (typeof jobCard === 'string') return jobCard;
     return 'N/A';
   };
 
@@ -122,7 +172,7 @@ export const InvoicesPage: React.FC = () => {
   const filteredInvoices = invoices.filter(i => {
     if (searchQuery) {
       const search = searchQuery.toLowerCase();
-      const matchInvoice = i.invoiceNumber.toLowerCase().includes(search);
+      const matchInvoice = i.invoiceNumber?.toLowerCase().includes(search);
       const matchCustomer = getCustomerName(i).toLowerCase().includes(search);
       const matchVehicle = getVehicleReg(i).toLowerCase().includes(search);
       const matchJobCard = getJobCardNumber(i).toLowerCase().includes(search);
@@ -130,6 +180,19 @@ export const InvoicesPage: React.FC = () => {
     }
     if (statusFilter !== 'all' && i.status !== statusFilter) return false;
     if (paymentStatusFilter !== 'all' && i.paymentStatus !== paymentStatusFilter) return false;
+    if (dateFilter !== 'all' && i.createdAt) {
+      const invDate = new Date(i.createdAt);
+      const now = new Date();
+      if (dateFilter === 'today') {
+        if (invDate.toDateString() !== now.toDateString()) return false;
+      } else if (dateFilter === 'week') {
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        if (invDate < weekAgo) return false;
+      } else if (dateFilter === 'month') {
+        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        if (invDate < monthAgo) return false;
+      }
+    }
     return true;
   });
 
@@ -168,10 +231,10 @@ export const InvoicesPage: React.FC = () => {
         <div className="bg-white rounded-xl border border-slate-100 shadow-card p-4">
           <div className="flex items-center justify-between mb-2">
             <Clock className="w-5 h-5 text-amber-600" />
-            <span className="text-xs text-slate-500">Pending</span>
+            <span className="text-xs text-slate-500">Draft</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900">{stats.pendingApproval}</p>
-          <p className="text-xs text-slate-500">Pending Approval</p>
+          <p className="text-2xl font-bold text-slate-900">{stats.draft}</p>
+          <p className="text-xs text-slate-500">Draft Invoices</p>
         </div>
         
         <div className="bg-white rounded-xl border border-slate-100 shadow-card p-4">
@@ -233,26 +296,27 @@ export const InvoicesPage: React.FC = () => {
               placeholder="Search Invoice / Customer / Vehicle / Job Card"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm"
+              className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
           
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
           >
             <option value="all">Status: All</option>
             <option value="draft">Draft</option>
-            <option value="review">Review</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
+            <option value="sent">Sent</option>
+            <option value="paid">Paid</option>
+            <option value="overdue">Overdue</option>
+            <option value="cancelled">Cancelled</option>
           </select>
           
           <select
             value={paymentStatusFilter}
             onChange={(e) => setPaymentStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
           >
             <option value="all">Payment Status: All</option>
             <option value="unpaid">Unpaid</option>
@@ -263,31 +327,20 @@ export const InvoicesPage: React.FC = () => {
           <select
             value={dateFilter}
             onChange={(e) => setDateFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
           >
+            <option value="all">Date: All Time</option>
             <option value="today">Date: Today</option>
-            <option value="week">This Week</option>
-            <option value="month">This Month</option>
-            <option value="all">All Time</option>
-          </select>
-          
-          <select
-            value={paymentMethodFilter}
-            onChange={(e) => setPaymentMethodFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
-          >
-            <option value="all">Payment Method: All</option>
-            <option value="cash">Cash</option>
-            <option value="card">Card</option>
-            <option value="bank_transfer">Bank Transfer</option>
+            <option value="week">Date: This Week</option>
+            <option value="month">Date: This Month</option>
           </select>
         </div>
       </div>
 
       {/* Invoices Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200">
-          <h3 className="text-sm font-bold text-slate-500 uppercase">INVOICES</h3>
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">INVOICES ({filteredInvoices.length})</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -299,27 +352,56 @@ export const InvoicesPage: React.FC = () => {
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-600 uppercase">Job Card</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-600 uppercase">Amount</th>
                 <th className="text-left py-3 px-4 text-xs font-bold text-slate-600 uppercase">Payment Status</th>
+                <th className="text-right py-3 px-4 text-xs font-bold text-slate-600 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredInvoices.length > 0 ? (
-                filteredInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="py-3 px-4 text-sm font-medium text-brand-600">
-                      <Link to={`/manager/invoices/${invoice._id || invoice.id}`} className="hover:underline">
-                        {invoice.invoiceNumber}
-                      </Link>
-                    </td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{getCustomerName(invoice)}</td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{getVehicleReg(invoice)}</td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{getJobCardNumber(invoice)}</td>
-                    <td className="py-3 px-4 text-sm text-slate-900 font-medium">{formatLKR(invoice.amount)}</td>
-                    <td className="py-3 px-4">{getPaymentStatusBadge(invoice.paymentStatus)}</td>
-                  </tr>
-                ))
+                filteredInvoices.map((invoice) => {
+                  const invId = invoice._id || invoice.id || '';
+                  const totalAmt = invoice.grandTotal ?? invoice.amount ?? 0;
+                  return (
+                    <tr key={invId} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                      <td className="py-3 px-4 text-sm font-medium text-brand-600 font-mono">
+                        <button
+                          onClick={() => setSelectedInvoiceId(invId)}
+                          className="hover:underline text-left font-semibold text-brand-600"
+                        >
+                          {invoice.invoiceNumber}
+                        </button>
+                      </td>
+                      <td className="py-3 px-4 text-sm text-slate-700 font-medium">{getCustomerName(invoice)}</td>
+                      <td className="py-3 px-4 text-sm text-slate-600 font-mono">{getVehicleReg(invoice)}</td>
+                      <td className="py-3 px-4 text-sm text-slate-600 font-mono">{getJobCardNumber(invoice)}</td>
+                      <td className="py-3 px-4 text-sm text-slate-900 font-semibold">{formatLKR(totalAmt)}</td>
+                      <td className="py-3 px-4">{getPaymentStatusBadge(invoice.paymentStatus)}</td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => setSelectedInvoiceId(invId)}
+                            className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-brand-600 transition-colors"
+                            title="View Invoice Details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          {invoice.paymentStatus !== 'paid' && (
+                            <button
+                              onClick={() => setSelectedInvoiceId(invId)}
+                              className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
+                              title="Record Payment"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              Pay
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-sm text-slate-400">
+                  <td colSpan={7} className="py-12 text-center text-sm text-slate-400">
                     No invoices found
                   </td>
                 </tr>
@@ -344,6 +426,20 @@ export const InvoicesPage: React.FC = () => {
             + Generate Invoice
           </Link>
         </div>
+      )}
+
+      {/* Invoice Details Modal */}
+      {selectedInvoiceId && (
+        <InvoiceDetailsModal
+          invoiceId={selectedInvoiceId}
+          onClose={() => {
+            setSelectedInvoiceId(null);
+            if (urlInvoiceId) {
+              navigate('/manager/invoices');
+            }
+          }}
+          onPaymentRecorded={fetchInvoices}
+        />
       )}
     </div>
   );

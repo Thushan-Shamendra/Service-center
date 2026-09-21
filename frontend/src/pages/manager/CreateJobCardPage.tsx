@@ -9,7 +9,7 @@ import { Appointment, User, Vehicle } from '../../types';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { ErrorState } from '../../components/ui/ErrorState';
 import { StatusBadge } from '../../components/ui/StatusBadge';
-import { ArrowLeft, Lock, Check, Calendar, User as UserIcon, Car, Factory, Users, ClipboardList, Plus } from 'lucide-react';
+import { ArrowLeft, Lock, X, Check, Calendar, User as UserIcon, Car, Factory, Users, ClipboardList, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import dayjs from 'dayjs';
 
@@ -28,6 +28,7 @@ export const CreateJobCardPage: React.FC = () => {
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [eligibleAppointments, setEligibleAppointments] = useState<Appointment[]>([]);
+  const [appointmentSearchTerm, setAppointmentSearchTerm] = useState('');
   const [technicians, setTechnicians] = useState<any[]>([]);
 
   const [nextJobCardId, setNextJobCardId] = useState('');
@@ -99,6 +100,22 @@ export const CreateJobCardPage: React.FC = () => {
       // Fetch rescheduled appointments
       const rescheduledRes = await appointmentApi.getAppointments({ limit: 100, status: 'rescheduled' });
       
+      // Fetch existing job cards to exclude appointments that already have a job card
+      let assignedAppointmentIds = new Set<string>();
+      try {
+        const jobCardsRes = await jobCardApi.getJobCards({ limit: 500 });
+        if (jobCardsRes.success && Array.isArray(jobCardsRes.data)) {
+          jobCardsRes.data.forEach((jc: any) => {
+            const aptId = typeof jc.appointment === 'object' && jc.appointment !== null
+              ? (jc.appointment._id || jc.appointment.id)
+              : jc.appointment;
+            if (aptId) assignedAppointmentIds.add(String(aptId));
+          });
+        }
+      } catch (jcErr) {
+        console.error('Error fetching job cards for deduplication:', jcErr);
+      }
+
       let allAppointments: Appointment[] = [];
       
       if (approvedRes.success) {
@@ -109,7 +126,30 @@ export const CreateJobCardPage: React.FC = () => {
         allAppointments = [...allAppointments, ...(rescheduledRes.data || [])];
       }
       
-      setEligibleAppointments(allAppointments);
+      // Filter out older appointments (past dates before today) and already assigned appointments
+      const today = dayjs().startOf('day');
+      const filtered = allAppointments
+        .filter((apt: Appointment) => {
+          const aptId = apt._id || apt.id;
+          // Filter out appointments already assigned to a job card
+          if (aptId && assignedAppointmentIds.has(String(aptId))) return false;
+
+          // Filter out appointments whose date is older than today
+          if (apt.preferredDate) {
+            const isOlderThanToday = dayjs(apt.preferredDate).isBefore(today, 'day');
+            if (isOlderThanToday) return false;
+          }
+
+          return true;
+        })
+        .sort((a, b) => {
+          const dateA = dayjs(a.preferredDate).valueOf();
+          const dateB = dayjs(b.preferredDate).valueOf();
+          if (dateA !== dateB) return dateA - dateB;
+          return (a.preferredTime || '').localeCompare(b.preferredTime || '');
+        });
+
+      setEligibleAppointments(filtered);
       
       // If appointment ID is in URL, auto-select it
       if (appointmentId) {
@@ -254,6 +294,23 @@ export const CreateJobCardPage: React.FC = () => {
     setSelectedAppointment(null);
     setErrors({});
   };
+
+  const filteredEligibleAppointments = eligibleAppointments.filter((apt) => {
+    if (!appointmentSearchTerm.trim()) return true;
+    const term = appointmentSearchTerm.toLowerCase();
+    const aptNum = apt.appointmentNumber?.toLowerCase() || '';
+    const customer = apt.customer as any;
+    const customerName = (typeof customer === 'object' && customer !== null
+      ? `${customer.user?.firstName || ''} ${customer.user?.lastName || ''} ${customer.user?.fullName || ''} ${customer.firstName || ''} ${customer.lastName || ''}`
+      : '').toLowerCase();
+    const vehicle = apt.vehicle as any;
+    const vehicleInfo = (typeof vehicle === 'object' && vehicle !== null
+      ? `${vehicle.make || ''} ${vehicle.model || ''} ${vehicle.registrationNumber || ''}`
+      : '').toLowerCase();
+    const serviceType = apt.serviceType?.toLowerCase() || '';
+
+    return aptNum.includes(term) || customerName.includes(term) || vehicleInfo.includes(term) || serviceType.includes(term);
+  });
 
   if (showSuccessModal && createdJobCard) {
     return (
@@ -666,30 +723,42 @@ export const CreateJobCardPage: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-900">Select Appointment</h3>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Select Appointment</h3>
+                <p className="text-xs text-slate-500">Showing today's and upcoming approved appointments</p>
+              </div>
               <button
-                onClick={() => setIsAppointmentModalOpen(false)}
+                type="button"
+                onClick={() => {
+                  setIsAppointmentModalOpen(false);
+                  setAppointmentSearchTerm('');
+                }}
                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
               >
-                <Lock className="w-5 h-5 text-slate-400" />
+                <X className="w-5 h-5 text-slate-400" />
               </button>
             </div>
 
             <div className="px-6 py-4 border-b border-slate-200">
               <input
                 type="text"
+                value={appointmentSearchTerm}
+                onChange={(e) => setAppointmentSearchTerm(e.target.value)}
                 placeholder="Search Appointment / Customer / Registration Number"
                 className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500 text-sm"
               />
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {eligibleAppointments.length > 0 ? (
+              {filteredEligibleAppointments.length > 0 ? (
                 <div className="divide-y divide-slate-100">
-                  {eligibleAppointments.map((apt) => (
+                  {filteredEligibleAppointments.map((apt) => (
                     <div
-                      key={apt.id}
-                      onClick={() => handleAppointmentSelect(apt)}
+                      key={apt._id || apt.id}
+                      onClick={() => {
+                        handleAppointmentSelect(apt);
+                        setAppointmentSearchTerm('');
+                      }}
                       className="px-6 py-4 hover:bg-slate-50 transition-colors cursor-pointer"
                     >
                       <div className="flex items-start justify-between">
@@ -726,6 +795,7 @@ export const CreateJobCardPage: React.FC = () => {
                 <div className="flex flex-col items-center justify-center py-12 text-slate-400">
                   <Calendar className="w-12 h-12 mb-4 opacity-50" />
                   <p className="text-sm">No eligible appointments found</p>
+                  <p className="text-xs text-slate-400 mt-1">Older past appointments and appointments already assigned to job cards are excluded.</p>
                 </div>
               )}
             </div>

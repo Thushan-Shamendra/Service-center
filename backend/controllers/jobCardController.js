@@ -7,6 +7,8 @@ import Notification from '../models/Notification.js';
 import ServiceTimeline from '../models/ServiceTimeline.js';
 import ServiceBay from '../models/ServiceBay.js';
 import InventoryItem from '../models/InventoryItem.js';
+import Appointment from '../models/Appointment.js';
+import Invoice from '../models/Invoice.js';
 
 // Helper function to get Employee ID from User ID
 const getEmployeeId = async (userId) => {
@@ -43,7 +45,19 @@ export const getJobCards = async (req, res) => {
     console.log('Query parameters:', req.query);
 
     const query = {};
-    if (req.query.status) query.status = req.query.status;
+    if (req.query.status === 'active') {
+      query.status = { $nin: ['delivered', 'cancelled'] };
+    } else if (req.query.status) {
+      query.status = req.query.status;
+    }
+
+    if (req.query.uninvoiced === 'true') {
+      const invoicedJobCardIds = await Invoice.distinct('jobCard', {
+        jobCard: { $exists: true, $ne: null },
+        status: { $ne: 'cancelled' },
+      });
+      query._id = { $nin: invoicedJobCardIds };
+    }
 
     // Scope for employee/technician role
     if (req.user.role === 'employee') {
@@ -91,6 +105,7 @@ export const getJobCards = async (req, res) => {
           populate: { path: 'user', select: 'firstName lastName' }
         })
         .populate('appointment')
+        .populate({ path: 'parts.item', select: 'itemName itemCode quantity sellingPrice unit' })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -125,7 +140,7 @@ export const getJobCardById = async (req, res) => {
       .populate({ path: 'assignedTechnician', populate: { path: 'user', select: 'firstName lastName' } })
       .populate({ path: 'assignedBy', populate: { path: 'user', select: 'firstName lastName' } })
       .populate('appointment')
-      .populate({ path: 'parts.item', select: 'name itemCode currentStock unit' });
+      .populate({ path: 'parts.item', select: 'itemName itemCode quantity sellingPrice unit' });
 
     if (!jobCard) return res.status(404).json({ success: false, message: 'Job card not found' });
 
@@ -144,11 +159,35 @@ export const getJobCardById = async (req, res) => {
 // @route   POST /api/job-cards
 export const createJobCard = async (req, res) => {
   try {
+    if (req.body.appointment) {
+      const existingJob = await JobCard.findOne({ appointment: req.body.appointment });
+      if (existingJob) {
+        return res.status(400).json({
+          success: false,
+          message: `A job card (${existingJob.jobCardNumber}) already exists for this appointment.`,
+        });
+      }
+    }
+
     const jobCard = await JobCard.create(req.body);
 
     // Update vehicle status
     if (jobCard.vehicle) {
       await Vehicle.findByIdAndUpdate(jobCard.vehicle, { currentServiceStatus: 'in_service' });
+    }
+
+    // Update appointment status history
+    if (jobCard.appointment) {
+      await Appointment.findByIdAndUpdate(jobCard.appointment, {
+        $push: {
+          statusHistory: {
+            status: 'approved',
+            changedAt: new Date(),
+            changedBy: req.user._id,
+            remarks: `Job card ${jobCard.jobCardNumber} created for this appointment`,
+          },
+        },
+      });
     }
 
     res.status(201).json({ success: true, data: jobCard, message: 'Job card created successfully' });
@@ -246,8 +285,23 @@ export const updateJobCardStatus = async (req, res) => {
       jobCard.progress = calculateProgressByStatus(status);
     }
 
-    if (status === 'delivered' && jobCard.vehicle) {
-      await Vehicle.findByIdAndUpdate(jobCard.vehicle, { currentServiceStatus: 'none' });
+    if (status === 'delivered') {
+      if (jobCard.appointment) {
+        await Appointment.findByIdAndUpdate(jobCard.appointment, {
+          status: 'completed',
+          $push: {
+            statusHistory: {
+              status: 'completed',
+              changedAt: new Date(),
+              changedBy: req.user._id,
+              remarks: 'Appointment marked completed upon job card delivery',
+            },
+          },
+        });
+      }
+      if (jobCard.vehicle) {
+        await Vehicle.findByIdAndUpdate(jobCard.vehicle, { currentServiceStatus: 'none' });
+      }
       // Release service bay when delivered
       if (jobCard.serviceBay) {
         await ServiceBay.findOneAndUpdate(
@@ -632,7 +686,7 @@ export const updateJobCard = async (req, res) => {
         new: true,
         runValidators: true,
       }
-    ).populate({ path: 'parts.item', select: 'name itemCode currentStock unit' });
+    ).populate({ path: 'parts.item', select: 'itemName itemCode quantity sellingPrice unit' });
 
     res.status(200).json({ success: true, data: updatedJobCard, message: 'Job card updated successfully' });
   } catch (error) {

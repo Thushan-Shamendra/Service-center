@@ -58,6 +58,7 @@ const sparePartsRequestSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    approvedAt: Date,
     issueDate: Date,
     issuedBy: {
       type: mongoose.Schema.Types.ObjectId,

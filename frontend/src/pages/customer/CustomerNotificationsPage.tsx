@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { notificationApi } from '../../api/notificationApi';
 import { 
@@ -12,7 +13,8 @@ import {
   Car, 
   Tag, 
   ChevronRight,
-  Clock
+  Clock,
+  FileText
 } from 'lucide-react';
 import { formatRelativeTime } from '../../utils/formatters';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
@@ -36,6 +38,7 @@ interface Notification {
 }
 
 export const CustomerNotificationsPage: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -102,6 +105,9 @@ export const CustomerNotificationsPage: React.FC = () => {
       repair_started: Wrench,
       repair_completed: Wrench,
       promotional: Tag,
+      quotation_submitted: FileText,
+      quotation_approved: FileText,
+      quotation_rejected: FileText,
     };
     return iconMap[type] || Bell;
   };
@@ -117,6 +123,9 @@ export const CustomerNotificationsPage: React.FC = () => {
       repair_started: 'Track Service',
       repair_completed: 'View Report',
       promotional: 'View Offer',
+      quotation_submitted: 'Review Quotation',
+      quotation_approved: 'View Quotation',
+      quotation_rejected: 'View Quotation',
     };
     return labelMap[type] || 'View Details';
   };
@@ -128,15 +137,14 @@ export const CustomerNotificationsPage: React.FC = () => {
     
     // Navigate based on notification type
     const type = notification.type;
-    if (type.includes('appointment') && notification.metadata?.appointmentId) {
-      // Navigate to appointment details
-      console.log('Navigate to appointment:', notification.metadata.appointmentId);
-    } else if (type.includes('vehicle') || type.includes('repair') && notification.metadata?.jobCardId) {
-      // Navigate to service tracking
-      console.log('Navigate to service tracking:', notification.metadata.jobCardId);
-    } else if (type.includes('invoice') || type.includes('payment') && notification.metadata?.invoiceId) {
-      // Navigate to invoice
-      console.log('Navigate to invoice:', notification.metadata.invoiceId);
+    if (type.includes('quotation')) {
+      navigate('/customer/quotations');
+    } else if (type.includes('appointment')) {
+      navigate('/customer/appointments');
+    } else if (type.includes('vehicle') || type.includes('repair')) {
+      navigate('/customer/tracking');
+    } else if (type.includes('invoice') || type.includes('payment')) {
+      navigate('/customer/invoices');
     }
   };
 

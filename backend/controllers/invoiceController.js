@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Invoice from '../models/Invoice.js';
 import Customer from '../models/Customer.js';
+import Payment from '../models/Payment.js';
 import Notification from '../models/Notification.js';
 
 // @desc    Get invoices with paymentStatus and customer filters
@@ -12,7 +13,15 @@ export const getInvoices = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const query = {};
-    if (req.query.paymentStatus) query.paymentStatus = req.query.paymentStatus;
+    if (req.query.paymentStatus && req.query.paymentStatus !== 'all') {
+      query.paymentStatus = req.query.paymentStatus;
+    }
+    if (req.query.status && req.query.status !== 'all') {
+      query.status = req.query.status;
+    }
+    if (req.query.jobCard) {
+      query.jobCard = req.query.jobCard;
+    }
 
     if (req.user.role === 'customer') {
       const customer = await Customer.findOne({ user: req.user._id });
@@ -30,6 +39,7 @@ export const getInvoices = async (req, res) => {
       Invoice.find(query)
         .populate({ path: 'customer', populate: { path: 'user', select: 'firstName lastName mobile email' } })
         .populate('vehicle')
+        .populate('jobCard', 'jobCardNumber complaint status')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -190,7 +200,6 @@ export const recordPayment = async (req, res) => {
     }
 
     // Create payment record
-    const Payment = mongoose.model('Payment');
     const payment = await Payment.create({
       invoice: invoice._id,
       customer: invoice.customer._id,

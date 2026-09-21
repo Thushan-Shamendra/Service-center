@@ -86,6 +86,20 @@ const STATUS_CONFIG = {
     color: 'green',
     progress: 100,
     nextActions: ['create_final_inspection']
+  },
+  ready_for_delivery: {
+    label: 'Ready for Delivery',
+    icon: '🚗',
+    color: 'green',
+    progress: 100,
+    nextActions: ['completed']
+  },
+  completed: {
+    label: 'Completed',
+    icon: '✅',
+    color: 'green',
+    progress: 100,
+    nextActions: []
   }
 };
 
@@ -107,6 +121,8 @@ export const RedesignedRepairProgressPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [formData, setFormData] = useState<any>({});
+  const [workNotes, setWorkNotes] = useState('');
+  const [isSavingWorkNotes, setIsSavingWorkNotes] = useState(false);
 
   useEffect(() => {
     if (jobCardId) {
@@ -159,10 +175,44 @@ export const RedesignedRepairProgressPage: React.FC = () => {
         toast.success(`Status updated to ${STATUS_CONFIG[newStatus as keyof typeof STATUS_CONFIG]?.label}`);
         setActiveModal(null);
         setFormData({});
-        fetchRepairProgress();
+        await fetchRepairProgress();
       }
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Failed to update status');
+      // A downstream failure or another session may have already changed the job.
+      await fetchRepairProgress();
+    }
+  };
+
+  const handleSaveWorkNotes = async () => {
+    if (!repairData?.jobCard) return;
+
+    const workItems = workNotes
+      .split('\n')
+      .map(item => item.trim())
+      .filter(Boolean);
+
+    if (workItems.length === 0) {
+      toast.error('Please enter at least one work note');
+      return;
+    }
+
+    setIsSavingWorkNotes(true);
+    try {
+      const res = await repairProgressApi.addWorkPerformed(repairData.jobCard._id, {
+        workItems,
+      });
+      if (res.success) {
+        toast.success('Work notes saved successfully');
+        setWorkNotes('');
+        await fetchRepairProgress();
+      } else {
+        toast.error(res.message || 'Failed to save work notes');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to save work notes');
+    } finally {
+      setIsSavingWorkNotes(false);
     }
   };
 
@@ -357,6 +407,10 @@ export const RedesignedRepairProgressPage: React.FC = () => {
       {currentStatus === 'repair_in_progress' && (
         <RepairInProgressSection 
           jobCard={repairData.jobCard}
+          workNotes={workNotes}
+          isSavingWorkNotes={isSavingWorkNotes}
+          onWorkNotesChange={setWorkNotes}
+          onSaveWorkNotes={handleSaveWorkNotes}
           onTesting={() => handleStatusUpdate('testing')}
         />
       )}
@@ -374,6 +428,15 @@ export const RedesignedRepairProgressPage: React.FC = () => {
           jobCard={repairData.jobCard}
           finalReport={repairData.finalReport}
           onCreateFinalInspection={handleCreateFinalInspection}
+          onViewFinalInspection={() => navigate(`/employee/final-inspection-preview/${jobCardId}`)}
+        />
+      )}
+
+      {(currentStatus === 'ready_for_delivery' || currentStatus === 'completed' || repairData.finalReport) && currentStatus !== 'work_complete' && (
+        <ReadyForDeliverySection
+          jobCard={repairData.jobCard}
+          finalReport={repairData.finalReport}
+          onViewFinalInspection={() => navigate(`/employee/final-inspection-preview/${jobCardId}`)}
         />
       )}
 
@@ -509,9 +572,18 @@ const WaitingForPartsSection = ({ partsRequests, onRequestParts, onInProgress }:
   <div className="bg-orange-50 border border-orange-200 rounded-xl p-6 space-y-6">
     {/* Parts Requested */}
     <div>
-      <div className="flex items-center gap-2 mb-4">
-        <Package className="w-5 h-5 text-orange-600" />
-        <h3 className="text-lg font-semibold text-orange-900">🔩 Parts Requested</h3>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Package className="w-5 h-5 text-orange-600" />
+          <h3 className="text-lg font-semibold text-orange-900">🔩 Parts Requested</h3>
+        </div>
+        <button
+          onClick={onRequestParts}
+          className="flex items-center gap-1.5 px-3.5 py-1.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm font-semibold shadow-sm"
+        >
+          <Plus className="w-4 h-4" />
+          Request Spare Parts
+        </button>
       </div>
       <div className="bg-white rounded-lg p-4 border border-orange-100">
         {partsRequests && partsRequests.length > 0 ? (
@@ -527,7 +599,7 @@ const WaitingForPartsSection = ({ partsRequests, onRequestParts, onInProgress }:
               <tbody>
                 {partsRequests.map((request: any) => (
                   <tr key={request._id} className="border-b border-gray-100">
-                    <td className="py-2 px-3 text-gray-900">{request.itemName}</td>
+                    <td className="py-2 px-3 text-gray-900 font-medium">{request.itemName}</td>
                     <td className="py-2 px-3 text-gray-900">{request.requestedQuantity}</td>
                     <td className="py-2 px-3">
                       <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ${
@@ -548,16 +620,34 @@ const WaitingForPartsSection = ({ partsRequests, onRequestParts, onInProgress }:
             </table>
           </div>
         ) : (
-          <p className="text-sm text-gray-500">No parts requested yet</p>
+          <div className="text-center py-6">
+            <Package className="w-10 h-10 text-orange-300 mx-auto mb-2" />
+            <p className="text-sm font-medium text-gray-700 mb-1">No parts requested yet</p>
+            <p className="text-xs text-gray-500 mb-4">Request inspection parts or additional items from inventory</p>
+            <button
+              onClick={onRequestParts}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm font-semibold shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Request Spare Parts
+            </button>
+          </div>
         )}
       </div>
     </div>
 
     {/* Next Action */}
-    <div className="border-t border-orange-200 pt-4">
+    <div className="border-t border-orange-200 pt-4 flex gap-3">
+      <button
+        onClick={onRequestParts}
+        className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-white border border-orange-300 text-orange-700 rounded-lg hover:bg-orange-100/50 transition-colors font-semibold"
+      >
+        <Plus className="w-4 h-4" />
+        Request More Parts
+      </button>
       <button
         onClick={onInProgress}
-        className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+        className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
       >
         <Wrench className="w-4 h-4" />
         ⏭️ Mark as Repair In Progress
@@ -566,7 +656,14 @@ const WaitingForPartsSection = ({ partsRequests, onRequestParts, onInProgress }:
   </div>
 );
 
-const RepairInProgressSection = ({ jobCard, onTesting }: any) => (
+const RepairInProgressSection = ({
+  jobCard,
+  workNotes,
+  isSavingWorkNotes,
+  onWorkNotesChange,
+  onSaveWorkNotes,
+  onTesting,
+}: any) => (
   <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-6">
     {/* Progress */}
     <div>
@@ -605,13 +702,39 @@ const RepairInProgressSection = ({ jobCard, onTesting }: any) => (
           <p className="text-sm text-gray-500">No work notes recorded yet</p>
         )}
       </div>
+
+      <div className="mt-4 space-y-3">
+        <label htmlFor="work-notes" className="block text-sm font-medium text-gray-700">
+          Add Work Performed
+        </label>
+        <textarea
+          id="work-notes"
+          rows={4}
+          value={workNotes}
+          onChange={(event) => onWorkNotesChange(event.target.value)}
+          placeholder={'Enter each completed task on a new line\nExample: Replaced engine oil and oil filter'}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+        />
+        <p className="text-xs text-gray-500">Enter one completed task per line.</p>
+        <button
+          type="button"
+          onClick={onSaveWorkNotes}
+          disabled={isSavingWorkNotes || !workNotes.trim()}
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isSavingWorkNotes ? <Loader className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {isSavingWorkNotes ? 'Saving...' : 'Save Work Notes'}
+        </button>
+      </div>
     </div>
 
     {/* Next Action */}
     <div className="border-t border-gray-200 pt-4">
       <button
         onClick={onTesting}
-        className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold"
+        disabled={!jobCard.workPerformed?.length}
+        title={!jobCard.workPerformed?.length ? 'Save at least one work note before moving to Testing' : undefined}
+        className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Car className="w-4 h-4" />
         ⏭️ Mark as Testing
@@ -750,6 +873,56 @@ const WorkCompleteSection = ({ jobCard, finalReport, onCreateFinalInspection }: 
         <ArrowLeft className="w-4 h-4" />
         🔄 Back to Job
       </button>
+    </div>
+  </div>
+);
+
+const ReadyForDeliverySection = ({ jobCard, finalReport, onViewFinalInspection }: any) => (
+  <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl p-6 space-y-6 shadow-sm">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex items-center gap-3">
+        <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 flex-shrink-0">
+          <CheckCircle className="w-6 h-6" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-emerald-900">Vehicle Inspection & Repairs Certified</h3>
+          <p className="text-xs text-emerald-700">All repair operations, safety checks, and road tests have been verified.</p>
+        </div>
+      </div>
+      <button
+        onClick={onViewFinalInspection}
+        className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
+      >
+        <FileText className="w-4 h-4" />
+        View Final Inspection Report
+      </button>
+    </div>
+
+    <div className="bg-white rounded-xl p-4 border border-emerald-100 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+      <div>
+        <span className="text-xs text-gray-500 block">Job Status</span>
+        <span className="font-bold text-emerald-700 capitalize">
+          {jobCard.status.replace(/_/g, ' ')}
+        </span>
+      </div>
+      <div>
+        <span className="text-xs text-gray-500 block">Final Report ID</span>
+        <span className="font-mono font-bold text-gray-900">
+          {finalReport?.reportId || 'FIN-INSPECTED'}
+        </span>
+      </div>
+      <div>
+        <span className="text-xs text-gray-500 block">Safety Check</span>
+        <span className="font-bold text-emerald-700">
+          {finalReport?.safetyCheck?.overallStatus === 'fail' ? '❌ Fail' : '✅ Pass'}
+        </span>
+      </div>
+      <div>
+        <span className="text-xs text-gray-500 block">Road Test</span>
+        <span className="font-bold text-emerald-700">
+          {finalReport?.roadTestResult?.result === 'fail' ? '❌ Fail' : '✅ Pass'}
+        </span>
+      </div>
     </div>
   </div>
 );

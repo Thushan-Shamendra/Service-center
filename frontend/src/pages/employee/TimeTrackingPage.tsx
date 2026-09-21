@@ -45,7 +45,10 @@ export const TimeTrackingPage: React.FC = () => {
 
       if (logsRes.data.success) setTimeLogs(logsRes.data.data);
       if (summaryRes.data.success) setDailySummary(summaryRes.data.data);
-      if (jobsRes.data.success) setAssignedJobs(jobsRes.data.data);
+      if (jobsRes.data.success) {
+        const activeJobs = (jobsRes.data.data || []).filter((jc: any) => jc.status !== 'delivered' && jc.status !== 'cancelled');
+        setAssignedJobs(activeJobs);
+      }
     } catch (error) {
       toast.error('Failed to fetch time tracking data');
     } finally {

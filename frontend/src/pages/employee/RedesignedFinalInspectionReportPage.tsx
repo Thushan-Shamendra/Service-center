@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { repairProgressApi } from '../../api/repairProgressApi';
 import { finalInspectionReportApi } from '../../api/finalInspectionReportApi';
@@ -37,6 +37,12 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
   const [repairData, setRepairData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [totalHoursInput, setTotalHoursInput] = useState('0');
+  const [submitError, setSubmitError] = useState('');
+  const [remarksError, setRemarksError] = useState('');
+  const remarksRef = useRef<HTMLTextAreaElement>(null);
+  const evidenceInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const [formData, setFormData] = useState({
     // Work Performed
     workPerformed: [] as string[],
@@ -73,6 +79,7 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
     
     // Mechanic Remarks
     mechanicRemarks: '',
+    finalCondition: 'good',
     
     // Evidence
     evidence: [] as any[],
@@ -99,13 +106,18 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
         
         // Auto-fill data from repair progress
         const jobCard = res.data.jobCard;
+        const hours = (res.data.workLogs || []).reduce((sum: number, log: any) => {
+          const value = Number(log.hoursWorked);
+          return sum + (Number.isFinite(value) && value >= 0 ? value : 0);
+        }, 0);
+        setTotalHoursInput(String(Math.round(hours * 100) / 100));
         setFormData(prev => ({
           ...prev,
           workPerformed: jobCard.workPerformed || [],
           partsReplaced: jobCard.parts || [],
           roadTestResult: res.data.roadTests?.[0]?.result || 'pass',
           roadTestRemarks: res.data.roadTests?.[0]?.remarks || '',
-          totalHours: jobCard.timeLogs?.reduce((acc: number, t: any) => acc + (t.hoursWorked || 0), 0) || 0,
+          totalHours: hours,
           totalPartsCost: jobCard.parts?.reduce((acc: number, p: any) => acc + (p.total || 0), 0) || 0,
         }));
       }
@@ -162,10 +174,26 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    if (isUploading || isSubmitting) return;
+    setSubmitError('');
+    const mechanicRemarks = formData.mechanicRemarks.trim();
+    if (!mechanicRemarks || mechanicRemarks.length > 500) {
+      const message = !mechanicRemarks ? 'Please enter mechanic remarks' : 'Mechanic remarks must be 500 characters or fewer';
+      setRemarksError(message);
+      toast.error(message);
+      remarksRef.current?.focus();
+      return;
+    }
+    const totalHours = Number(totalHoursInput);
+    if (!totalHoursInput.trim() || !Number.isFinite(totalHours) || totalHours < 0) {
+      toast.error('Enter valid total hours (zero or more)');
+      return;
+    }
     setIsSubmitting(true);
     try {
       const reportData = {
         jobCard: jobCardId,
+        status: 'submitted',
         workPerformed: formData.workPerformed,
         partsReplaced: formData.partsReplaced,
         safetyCheck: {
@@ -181,13 +209,14 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
         remainingIssues: formData.remainingIssues,
         remainingIssuesPriority: formData.remainingIssuesPriority,
         futureRecommendations: formData.futureRecommendations,
-        mechanicRemarks: formData.mechanicRemarks,
+        mechanicRemarks,
+        finalCondition: formData.finalCondition,
         evidence: formData.evidence,
         reportSummary: {
           totalPartsCost: formData.totalPartsCost,
           laborCost: formData.laborCost,
           totalCost: formData.totalPartsCost + formData.laborCost,
-          totalHours: formData.totalHours,
+          totalHours,
         },
       };
 
@@ -196,10 +225,22 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
       if (res.success) {
         toast.success('Final Inspection Report submitted successfully!');
         navigate(`/employee/final-inspection-success/${jobCardId}`);
+      } else {
+        const message = res.message || 'Failed to submit report';
+        setSubmitError(message);
+        toast.error(message);
       }
     } catch (error: any) {
       console.error('Error submitting report:', error);
-      toast.error(error.response?.data?.message || 'Failed to submit report');
+      const response = error.response?.data;
+      const message = response?.errors ? Object.values(response.errors).join('; ')
+        : response?.error || response?.message || 'Failed to submit report';
+      setSubmitError(message);
+      toast.error(message);
+      if (response?.errors?.mechanicRemarks) {
+        setRemarksError(response.errors.mechanicRemarks);
+        remarksRef.current?.focus();
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -207,6 +248,29 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
 
   const handleSaveDraft = () => {
     toast.success('Draft saved successfully');
+  };
+
+  const handleEvidenceUpload = async (event: React.ChangeEvent<HTMLInputElement>, type: string) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const allowed = type === 'video' ? ['video/mp4', 'video/quicktime', 'video/x-msvideo']
+      : type === 'document' ? ['application/pdf'] : ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowed.includes(file.type) || file.size > 10 * 1024 * 1024) {
+      toast.error('Choose a supported file up to 10 MB');
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const result = await finalInspectionReportApi.uploadEvidence(file);
+      if (!result.success || !result.data?.url) throw new Error('Upload failed');
+      setFormData(prev => ({ ...prev, evidence: [...prev.evidence, { ...result.data, type }] }));
+      toast.success('Evidence uploaded');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to upload evidence. Please try again.');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handlePrint = () => {
@@ -564,19 +628,40 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
         <div className="flex items-center gap-2 mb-4">
           <FileText className="w-5 h-5 text-gray-600" />
-          <h2 className="text-lg font-semibold text-gray-900">📝 7. Mechanic Remarks</h2>
+          <h2 className="text-lg font-semibold text-gray-900"><label htmlFor="mechanic-remarks">📝 7. Mechanic Remarks (required)</label></h2>
         </div>
         <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
           <textarea
+            ref={remarksRef}
+            id="mechanic-remarks"
+            required
+            maxLength={500}
+            aria-invalid={Boolean(remarksError)}
+            aria-describedby="mechanic-remarks-help"
             value={formData.mechanicRemarks}
-            onChange={(e) => setFormData({ ...formData, mechanicRemarks: e.target.value })}
+            onChange={(e) => {
+              setFormData({ ...formData, mechanicRemarks: e.target.value });
+              setRemarksError('');
+            }}
             rows={4}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
             placeholder="Enter final mechanic remarks..."
           />
+          <p id="mechanic-remarks-help" className={`text-xs mt-2 ${remarksError ? 'text-red-600' : 'text-gray-500'}`}>
+            {remarksError || `${formData.mechanicRemarks.length}/500 characters`}
+          </p>
         </div>
       </div>
 
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <label htmlFor="final-condition" className="block text-sm font-medium mb-2">Final Vehicle Condition</label>
+        <select id="final-condition" value={formData.finalCondition}
+          onChange={event => setFormData(prev => ({ ...prev, finalCondition: event.target.value }))}
+          className="border border-gray-300 rounded-lg p-2">
+          <option value="excellent">Excellent</option><option value="good">Good</option>
+          <option value="fair">Fair</option><option value="needs_repair">Needs repair</option>
+        </select>
+      </div>
       {/* 8. Evidence Upload */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
         <div className="flex items-center gap-2 mb-4">
@@ -584,37 +669,60 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
           <h2 className="text-lg font-semibold text-gray-900">📎 8. Evidence Upload</h2>
         </div>
         <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+          {[
+            { type: 'before', accept: 'image/jpeg,image/png,image/gif,image/webp' },
+            { type: 'after', accept: 'image/jpeg,image/png,image/gif,image/webp' },
+            { type: 'video', accept: 'video/mp4,video/quicktime,video/x-msvideo' },
+            { type: 'document', accept: 'application/pdf' },
+          ].map(item => (
+            <input key={item.type} type="file" accept={item.accept} hidden
+              ref={element => { evidenceInputs.current[item.type] = element; }}
+              disabled={isUploading || isSubmitting}
+              onChange={event => handleEvidenceUpload(event, item.type)} />
+          ))}
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
               <Camera className="w-8 h-8 mx-auto text-gray-400 mb-2" />
               <p className="text-xs text-gray-500 mb-2">Before Photo</p>
-              <button className="text-xs text-blue-600 hover:text-blue-800">📷 Upload</button>
+              <button type="button" aria-label="Upload Before Photo" disabled={isUploading || isSubmitting} onClick={() => evidenceInputs.current.before?.click()} className="text-xs text-blue-600 hover:text-blue-800">📷 Upload</button>
             </div>
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
               <Camera className="w-8 h-8 mx-auto text-gray-400 mb-2" />
               <p className="text-xs text-gray-500 mb-2">After Photo</p>
-              <button className="text-xs text-blue-600 hover:text-blue-800">📷 Upload</button>
+              <button type="button" aria-label="Upload After Photo" disabled={isUploading || isSubmitting} onClick={() => evidenceInputs.current.after?.click()} className="text-xs text-blue-600 hover:text-blue-800">📷 Upload</button>
             </div>
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
               <Video className="w-8 h-8 mx-auto text-gray-400 mb-2" />
               <p className="text-xs text-gray-500 mb-2">Test Video</p>
-              <button className="text-xs text-blue-600 hover:text-blue-800">📹 Upload</button>
+              <button type="button" aria-label="Upload Test Video" disabled={isUploading || isSubmitting} onClick={() => evidenceInputs.current.video?.click()} className="text-xs text-blue-600 hover:text-blue-800">📹 Upload</button>
             </div>
           </div>
           <div className="flex gap-2">
-            <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm">
+            <button type="button" aria-label="Upload Photo" disabled={isUploading || isSubmitting} onClick={() => evidenceInputs.current.after?.click()} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm">
               <Camera className="w-4 h-4" />
               📷 Upload Photo
             </button>
-            <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm">
+            <button type="button" aria-label="Upload Video" disabled={isUploading || isSubmitting} onClick={() => evidenceInputs.current.video?.click()} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm">
               <Video className="w-4 h-4" />
               📹 Upload Video
             </button>
-            <button className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm">
+            <button type="button" aria-label="Upload PDF" disabled={isUploading || isSubmitting} onClick={() => evidenceInputs.current.document?.click()} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm">
               <FileIcon className="w-4 h-4" />
               📄 Upload PDF
             </button>
           </div>
+          {isUploading && <p role="status" className="mt-3 text-xs text-gray-500">Uploading evidence...</p>}
+          {formData.evidence.length > 0 && <ul className="mt-3 space-y-2">
+            {formData.evidence.map((item, index) => (
+              <li key={item.url} className="flex items-center gap-3 text-sm">
+                <a href={(import.meta.env.VITE_API_URL || '') + item.url} target="_blank" rel="noreferrer"
+                  className="text-blue-600 underline break-all">{item.caption} ({item.type})</a>
+                <button type="button" disabled={isSubmitting || isUploading} aria-label={'Remove ' + item.caption}
+                  onClick={() => setFormData(prev => ({ ...prev, evidence: prev.evidence.filter((_, i) => i !== index) }))}
+                  className="text-red-600">Remove</button>
+              </li>
+            ))}
+          </ul>}
         </div>
       </div>
 
@@ -645,7 +753,12 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
             </div>
             <div className="flex justify-between items-center p-3 bg-white rounded-lg border border-gray-200">
               <span className="text-sm text-gray-600">Total Hours</span>
-              <span className="text-sm font-bold text-gray-900">{formData.totalHours.toFixed(1)} hours</span>
+              <div className="text-right">
+                <input type="number" min="0" step="0.01" aria-label="Total Hours"
+                  value={totalHoursInput} onChange={event => setTotalHoursInput(event.target.value)}
+                  className="w-24 text-right text-sm font-bold border border-gray-300 rounded px-2 py-1" />
+                <p className="mt-1 text-xs text-gray-500">From work logs; adjust actual hours if needed.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -672,10 +785,11 @@ export const RedesignedFinalInspectionReportPage: React.FC = () => {
       </div>
 
       {/* Action Buttons */}
+      {submitError && <p role="alert" className="p-4 rounded-lg bg-red-50 text-red-700">{submitError}</p>}
       <div className="flex flex-wrap gap-3">
         <button
           onClick={handleSubmit}
-          disabled={isSubmitting}
+          disabled={isSubmitting || isUploading}
           className="flex-1 min-w-[200px] flex items-center justify-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold disabled:bg-gray-300 disabled:cursor-not-allowed"
         >
           <CheckCircle className="w-4 h-4" />

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { jobCardApi } from '../../api/jobCardApi';
+import { serviceBayApi } from '../../api/serviceBayApi';
 import { JobCard } from '../../types';
 import { StatCard } from '../../components/ui/StatCard';
 import { StatusBadge } from '../../components/ui/StatusBadge';
@@ -35,14 +36,15 @@ export const JobCardsPage: React.FC = () => {
   // Stats
   const [stats, setStats] = useState({
     activeJobs: 0,
+    pending: 0,
     diagnosing: 0,
     repairing: 0,
     readyForDelivery: 0,
     waitingParts: 0,
     todayJobs: 0,
-    techniciansWorking: 4,
-    baysOccupied: 3,
-    baysTotal: 4,
+    techniciansWorking: 0,
+    baysOccupied: null as number | null,
+    baysTotal: null as number | null,
   });
 
   // Filters
@@ -64,7 +66,10 @@ export const JobCardsPage: React.FC = () => {
       if (statusFilter !== 'all') params.status = statusFilter;
       if (searchQuery) params.search = searchQuery;
 
-      const res = await jobCardApi.getJobCards(params);
+      const [res, baysRes] = await Promise.all([
+        jobCardApi.getJobCards(params),
+        serviceBayApi.getServiceBays().catch(() => null),
+      ]);
 
       if (res.success) {
         setJobCards(res.data || []);
@@ -74,24 +79,32 @@ export const JobCardsPage: React.FC = () => {
           jc.status !== 'delivered' && jc.status !== 'cancelled'
         );
         
-        const diagnosing = activeJobs.filter((jc: JobCard) => jc.status === 'diagnosing').length;
-        const repairing = activeJobs.filter((jc: JobCard) => jc.status === 'repair_in_progress').length;
+        const pending = activeJobs.filter((jc: JobCard) => jc.status === 'pending').length;
+        const diagnosing = activeJobs.filter((jc: JobCard) => ['diagnosing', 'inspection_started', 'inspection_complete'].includes(jc.status)).length;
+        const repairing = activeJobs.filter((jc: JobCard) => ['repair_started', 'repair_in_progress'].includes(jc.status)).length;
         const readyForDelivery = activeJobs.filter((jc: JobCard) => jc.status === 'ready_for_delivery').length;
         const waitingParts = activeJobs.filter((jc: JobCard) => jc.status === 'waiting_for_parts').length;
         
-        // Today's jobs (simplified)
-        const todayJobs = activeJobs.length;
+        const todayJobs = activeJobs.filter((jc: JobCard) =>
+          jc.createdAt && new Date(jc.createdAt).toDateString() === new Date().toDateString()
+        ).length;
+        const techniciansWorking = new Set(activeJobs.map((jc: JobCard) => {
+          const technician = jc.assignedTechnician;
+          return typeof technician === 'object' && technician
+            ? technician._id || technician.id : technician;
+        }).filter(Boolean)).size;
         
         setStats({
           activeJobs: activeJobs.length,
+          pending,
           diagnosing,
           repairing,
           readyForDelivery,
           waitingParts,
           todayJobs,
-          techniciansWorking: 4,
-          baysOccupied: 3,
-          baysTotal: 4,
+          techniciansWorking,
+          baysOccupied: baysRes?.success ? baysRes.data.filter((bay: { status: string }) => bay.status === 'occupied').length : null,
+          baysTotal: baysRes?.success ? baysRes.data.length : null,
         });
       } else {
         setError(res.message || 'Failed to load job cards');
@@ -278,11 +291,11 @@ export const JobCardsPage: React.FC = () => {
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-600">Technicians Working</span>
-              <span className="font-bold text-slate-900">{stats.techniciansWorking} / 6</span>
+              <span className="font-bold text-slate-900">{stats.techniciansWorking}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-600">Service Bays Occupied</span>
-              <span className="font-bold text-slate-900">{stats.baysOccupied} / {stats.baysTotal}</span>
+              <span className="font-bold text-slate-900">{stats.baysTotal === null ? 'Unavailable' : `${stats.baysOccupied} / ${stats.baysTotal}`}</span>
             </div>
           </div>
         </div>
@@ -481,15 +494,14 @@ export const JobCardsPage: React.FC = () => {
           <div className="flex items-center gap-4">
             <div className="text-sm text-slate-600">
               📊 Quick Stats: <span className="font-bold text-slate-900">Active: {stats.activeJobs}</span> | 
-              <span className="font-bold text-slate-900"> Pending: {stats.waitingParts}</span> | 
+              <span className="font-bold text-slate-900"> Pending: {stats.pending}</span> |
               <span className="font-bold text-slate-900"> Diagnosing: {stats.diagnosing}</span> | 
               <span className="font-bold text-slate-900"> Repair: {stats.repairing}</span>
             </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-sm text-slate-600">
-              🏭 Workshop Bays: <span className="font-bold text-slate-900">{stats.baysOccupied}/{stats.baysTotal} Occupied</span> | 
-              Avg. Completion: <span className="font-bold text-slate-900">2.5 days</span>
+              🏭 Workshop Bays: <span className="font-bold text-slate-900">{stats.baysTotal === null ? 'Unavailable' : `${stats.baysOccupied}/${stats.baysTotal} Occupied`}</span>
             </div>
           </div>
         </div>

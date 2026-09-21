@@ -21,7 +21,7 @@ import toast from 'react-hot-toast';
 type TabType = 'personal' | 'security' | 'notifications' | 'activity';
 
 export const ManagerProfilePage: React.FC = () => {
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabType>('personal');
@@ -70,8 +70,8 @@ export const ManagerProfilePage: React.FC = () => {
       setPersonalForm({
         firstName: user.firstName || '',
         lastName: user.lastName || '',
-        nic: user.nic || '',
-        gender: user.gender || 'male',
+        nic: user.profile?.nic ?? user.nic ?? '',
+        gender: user.profile?.gender || user.gender || 'male',
         mobile: user.mobile || '',
         email: user.email || '',
       });
@@ -120,16 +120,9 @@ export const ManagerProfilePage: React.FC = () => {
   const handlePersonalInfoSave = async () => {
     setIsSaving(true);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Update user context
-      await updateProfile({
-        ...user,
-        ...personalForm,
-        fullName: `${personalForm.firstName} ${personalForm.lastName}`,
-        gender: personalForm.gender as 'male' | 'female' | 'other',
-      });
+      const response = await userApi.updateProfile(personalForm);
+      if (!response.success) throw new Error(response.message || 'Failed to save profile');
+      await refreshUser();
       
       // Log activity
       await activityApi.logActivity({

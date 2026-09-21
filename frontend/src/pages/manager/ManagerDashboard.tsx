@@ -59,6 +59,11 @@ export const ManagerDashboard: React.FC = () => {
         dashboardApi.getManagerAlerts().catch(() => ({ success: false, data: [] })),
       ]);
 
+      if (!summaryRes.success) {
+        setError('Failed to load dashboard summary. Please retry.');
+        return;
+      }
+
       // Combine all data
       const combinedData: ManagerSummaryData = {
         ...(summaryRes.success ? summaryRes.data : {}),

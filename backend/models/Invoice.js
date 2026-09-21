@@ -4,6 +4,7 @@ import Counter from './Counter.js';
 const invoiceSchema = new mongoose.Schema(
   {
     invoiceNumber: { type: String, unique: true },
+    quotation: { type: mongoose.Schema.Types.ObjectId, ref: 'Quotation', unique: true, sparse: true },
     jobCard: { type: mongoose.Schema.Types.ObjectId, ref: 'JobCard' },
     customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
     vehicle: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },

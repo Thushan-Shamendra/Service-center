@@ -82,6 +82,7 @@ const jobCardSchema = new mongoose.Schema(
       max: 100,
     },
     inspectionNotes: String,
+    inspectionDate: Date,
     odometer: Number,
     vehicleCondition: {
       type: String,

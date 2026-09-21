@@ -16,8 +16,8 @@ interface Quotation {
   customer: any;
   vehicle: any;
   jobCard: any;
-  amount: number;
-  status: 'draft' | 'review' | 'approved' | 'rejected' | 'converted' | 'awaiting_customer';
+  grandTotal: number;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'converted' | 'awaiting_customer';
   createdAt: string;
   validUntil?: string;
 }
@@ -39,6 +39,15 @@ export const QuotationsPage: React.FC = () => {
     
     try {
       const res = await quotationApi.getQuotations({ limit: 100 });
+      if (res.success) {
+        const all = [...(res.data || [])];
+        for (let page = 2; page <= (res.pagination?.pages || 1); page++) {
+          const next = await quotationApi.getQuotations({ limit: 100, page });
+          if (!next.success) throw new Error(next.message || 'Failed to load quotations');
+          all.push(...next.data);
+        }
+        res.data = all;
+      }
       
       if (res.success) {
         setQuotations(res.data || []);
@@ -60,7 +69,7 @@ export const QuotationsPage: React.FC = () => {
 
   const getCustomerName = (quotation: Quotation) => {
     const customer = quotation.customer;
-    if (typeof customer === 'object' && customer.user) {
+    if (customer && typeof customer === 'object' && customer.user) {
       return `${customer.user.firstName} ${customer.user.lastName}`;
     }
     return 'Unknown';
@@ -68,7 +77,7 @@ export const QuotationsPage: React.FC = () => {
 
   const getVehicleInfo = (quotation: Quotation) => {
     const vehicle = quotation.vehicle;
-    if (typeof vehicle === 'object') {
+    if (vehicle && typeof vehicle === 'object') {
       return `${vehicle.make} ${vehicle.model}`;
     }
     return 'Unknown';
@@ -76,7 +85,7 @@ export const QuotationsPage: React.FC = () => {
 
   const getVehicleReg = (quotation: Quotation) => {
     const vehicle = quotation.vehicle;
-    if (typeof vehicle === 'object') {
+    if (vehicle && typeof vehicle === 'object') {
       return vehicle.registrationNumber;
     }
     return 'N/A';
@@ -84,7 +93,7 @@ export const QuotationsPage: React.FC = () => {
 
   const getJobCardNumber = (quotation: Quotation) => {
     const jobCard = quotation.jobCard;
-    if (typeof jobCard === 'object') {
+    if (jobCard && typeof jobCard === 'object') {
       return jobCard.jobCardNumber;
     }
     return 'N/A';
@@ -100,17 +109,25 @@ export const QuotationsPage: React.FC = () => {
       if (!matchQuote && !matchCustomer && !matchVehicle && !matchJobCard) return false;
     }
     if (statusFilter !== 'all' && q.status !== statusFilter) return false;
+    if (dateFilter !== 'all' && !dayjs(q.createdAt).isSame(dayjs(), dateFilter === 'today' ? 'day' : dateFilter === 'week' ? 'week' : 'month')) return false;
+    const amount = q.grandTotal || 0;
+    if (amountFilter === 'low' && amount >= 50000) return false;
+    if (amountFilter === 'medium' && (amount < 50000 || amount > 100000)) return false;
+    if (amountFilter === 'high' && amount <= 100000) return false;
+    const tech = q.jobCard?.assignedTechnician;
+    if (technicianFilter !== 'all' && (tech?._id || tech?.id || 'unassigned') !== technicianFilter) return false;
     return true;
   });
+  const technicians = Array.from(new Map(quotations.map(q => q.jobCard?.assignedTechnician).filter(t => t?.user).map(t => [t._id || t.id, t])).values());
 
   const stats = {
     total: quotations.length,
-    pendingApproval: quotations.filter(q => q.status === 'review').length,
+    pendingApproval: quotations.filter(q => q.status === 'submitted').length,
     approved: quotations.filter(q => q.status === 'approved').length,
-    varianceAlerts: 0, // Would be calculated from variance tracking
-    quotedValue: quotations.reduce((sum, q) => sum + q.amount, 0),
+    expired: quotations.filter(q => ['draft', 'submitted'].includes(q.status) && q.validUntil && dayjs(q.validUntil).isBefore(dayjs(), 'day')).length,
+    quotedValue: quotations.reduce((sum, q) => sum + (q.grandTotal || 0), 0),
     converted: quotations.filter(q => q.status === 'converted').length,
-    awaitingCustomer: quotations.filter(q => q.status === 'awaiting_customer').length,
+    drafts: quotations.filter(q => q.status === 'draft').length,
     rejected: quotations.filter(q => q.status === 'rejected').length,
   };
 
@@ -170,8 +187,8 @@ export const QuotationsPage: React.FC = () => {
             <AlertTriangle className="w-5 h-5 text-rose-600" />
             <span className="text-xs text-slate-500">Alerts</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900">{stats.varianceAlerts}</p>
-          <p className="text-xs text-slate-500">Variance Alerts</p>
+          <p className="text-2xl font-bold text-slate-900">{stats.expired}</p>
+          <p className="text-xs text-slate-500">Expired Quotations</p>
         </div>
       </div>
 
@@ -198,10 +215,10 @@ export const QuotationsPage: React.FC = () => {
         <div className="bg-white rounded-xl border border-slate-100 shadow-card p-4">
           <div className="flex items-center justify-between mb-2">
             <Clock className="w-5 h-5 text-amber-600" />
-            <span className="text-xs text-slate-500">Awaiting</span>
+            <span className="text-xs text-slate-500">Drafts</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900">{stats.awaitingCustomer}</p>
-          <p className="text-xs text-slate-500">Awaiting Customer</p>
+          <p className="text-2xl font-bold text-slate-900">{stats.drafts}</p>
+          <p className="text-xs text-slate-500">Draft Quotations</p>
         </div>
         
         <div className="bg-white rounded-xl border border-slate-100 shadow-card p-4">
@@ -235,7 +252,7 @@ export const QuotationsPage: React.FC = () => {
           >
             <option value="all">Status: All</option>
             <option value="draft">Draft</option>
-            <option value="review">Review</option>
+            <option value="submitted">Pending Approval</option>
             <option value="approved">Approved</option>
             <option value="converted">Converted</option>
             <option value="rejected">Rejected</option>
@@ -258,8 +275,8 @@ export const QuotationsPage: React.FC = () => {
             className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
           >
             <option value="all">Technician: All</option>
-            <option value="kasun">Kasun</option>
-            <option value="amila">Amila</option>
+            <option value="unassigned">Unassigned</option>
+            {technicians.map(t => <option key={t._id || t.id} value={t._id || t.id}>{t.user.firstName} {t.user.lastName}</option>)}
           </select>
           
           <select
@@ -295,7 +312,7 @@ export const QuotationsPage: React.FC = () => {
             <tbody>
               {filteredQuotations.length > 0 ? (
                 filteredQuotations.map((quotation) => (
-                  <tr key={quotation.id} className="border-b border-slate-100 hover:bg-slate-50">
+                  <tr key={quotation._id || quotation.id} className="border-b border-slate-100 hover:bg-slate-50">
                     <td className="py-3 px-4 text-sm font-medium text-brand-600">
                       <Link to={`/manager/quotations/${quotation._id || quotation.id}`} className="hover:underline">
                         {quotation.quotationNumber}
@@ -304,7 +321,7 @@ export const QuotationsPage: React.FC = () => {
                     <td className="py-3 px-4 text-sm text-slate-600">{getCustomerName(quotation)}</td>
                     <td className="py-3 px-4 text-sm text-slate-600">{getVehicleReg(quotation)}</td>
                     <td className="py-3 px-4 text-sm text-slate-600">{getJobCardNumber(quotation)}</td>
-                    <td className="py-3 px-4 text-sm text-slate-900 font-medium">{formatLKR(quotation.amount)}</td>
+                    <td className="py-3 px-4 text-sm text-slate-900 font-medium">{formatLKR(quotation.grandTotal)}</td>
                     <td className="py-3 px-4">
                       <StatusBadge status={quotation.status} />
                     </td>

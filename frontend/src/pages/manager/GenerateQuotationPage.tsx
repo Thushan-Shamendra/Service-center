@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { jobCardApi } from '../../api/jobCardApi';
 import { quotationApi } from '../../api/quotationApi';
+import { inventoryApi } from '../../api/inventoryApi';
+import { sparePartsApi } from '../../api/sparePartsApi';
 import { JobCard } from '../../types';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { ErrorState } from '../../components/ui/ErrorState';
-import { ArrowLeft, Save, Plus, Trash2, Lock, FileText } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Lock, FileText, X, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
 import dayjs from 'dayjs';
 
 interface QuotationPart {
   id: string;
+  part?: string;
+  discount?: number;
   partName: string;
   partCode: string;
   quantity: number;
@@ -19,25 +23,139 @@ interface QuotationPart {
   availableStock: number;
 }
 
+interface InventoryItemOption {
+  _id?: string;
+  id?: string;
+  itemName: string;
+  itemCode: string;
+  quantity: number;
+  sellingPrice: number;
+  category?: string;
+  brand?: string;
+}
+
 export const GenerateQuotationPage: React.FC = () => {
   const navigate = useNavigate();
+  const { quotationId } = useParams();
+  const [searchParams] = useSearchParams();
+  const [isSaving, setIsSaving] = useState(false);
+  const [jobSearch, setJobSearch] = useState('');
+  const [taxRate, setTaxRate] = useState(0);
   
   const [jobCards, setJobCards] = useState<JobCard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
   const [selectedJobCard, setSelectedJobCard] = useState<JobCard | null>(null);
-  const [quotationNumber, setQuotationNumber] = useState('QT-00049');
+  const [quotationNumber, setQuotationNumber] = useState('Assigned when saved');
   const [quotationDate, setQuotationDate] = useState(dayjs().format('YYYY-MM-DD'));
   
   const [parts, setParts] = useState<QuotationPart[]>([]);
   const [laborCharge, setLaborCharge] = useState(3500);
   const [estimatedHours, setEstimatedHours] = useState(4.5);
-  const [discount, setDiscount] = useState(2000);
-  const [remarks, setRemarks] = useState('Quotation valid for 14 days. Prices may vary based on actual parts used.');
+  const [discount, setDiscount] = useState(0);
+  const [remarks, setRemarks] = useState('Quotation valid for 30 days. Prices may vary based on actual parts used.');
   
   const [showJobCardModal, setShowJobCardModal] = useState(false);
   const [showPartModal, setShowPartModal] = useState(false);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItemOption[]>([]);
+  const [isLoadingParts, setIsLoadingParts] = useState(false);
+  const [partSearch, setPartSearch] = useState('');
+
+  const populatePartsFromJobCard = async (jc: JobCard) => {
+    try {
+      const jobCardId = jc._id || jc.id;
+      let fullJobCard = jc;
+
+      if (jobCardId) {
+        try {
+          const res = await jobCardApi.getJobCardById(jobCardId);
+          if (res.success && res.data) {
+            fullJobCard = res.data;
+            setSelectedJobCard(fullJobCard);
+          }
+        } catch (fetchErr) {
+          console.error('Error fetching full job card details:', fetchErr);
+        }
+      }
+
+      // 1. Check for inspection parts saved directly in JobCard.parts
+      const rawParts = fullJobCard.parts || [];
+      if (Array.isArray(rawParts) && rawParts.length > 0) {
+        const populatedParts: QuotationPart[] = rawParts.map((p: any, index: number) => {
+          const itemObj = typeof p.item === 'object' && p.item !== null ? p.item : null;
+          const rawItemId = itemObj?._id || itemObj?.id || (typeof p.item === 'string' ? p.item : null);
+          const partId = rawItemId || p._id || p.id || `inspection-part-${index}`;
+          const partName = p.name || itemObj?.itemName || 'Inspection Part';
+          const partCode = itemObj?.itemCode || '';
+          const quantity = Number(p.quantity) || 1;
+          const unitPrice = Number(p.unitPrice || itemObj?.sellingPrice || 0);
+          const subtotal = Number(p.total) || (quantity * unitPrice);
+          const availableStock = Math.max(quantity, Number(itemObj?.quantity ?? 10));
+
+          return {
+            id: String(partId),
+            part: rawItemId && /^[0-9a-fA-F]{24}$/.test(String(rawItemId)) ? String(rawItemId) : undefined,
+            partName,
+            partCode,
+            quantity,
+            unitPrice,
+            subtotal,
+            availableStock,
+            discount: 0,
+          };
+        });
+
+        setParts(populatedParts);
+        toast.success(`Automatically loaded ${populatedParts.length} part(s) from inspection`);
+      } else if (jobCardId) {
+        // 2. Fallback: Check for approved spare parts requests
+        try {
+          const sprRes = await sparePartsApi.getSparePartsByJobCard(jobCardId);
+          const requests = (sprRes.success && Array.isArray(sprRes.data)) ? sprRes.data : [];
+          const approvedRequests = requests.filter((r: any) => r.status === 'approved' || r.status === 'issued');
+          if (approvedRequests.length > 0) {
+            const sprParts: QuotationPart[] = approvedRequests.map((r: any, idx: number) => {
+              const itemObj = typeof r.item === 'object' && r.item !== null ? r.item : null;
+              const rawItemId = itemObj?._id || itemObj?.id || (typeof r.item === 'string' ? r.item : null);
+              const partId = rawItemId || r._id || `spr-part-${idx}`;
+              const partName = r.itemName || itemObj?.itemName || 'Requested Part';
+              const partCode = itemObj?.itemCode || '';
+              const quantity = Number(r.approvedQuantity || r.requestedQuantity || 1);
+              const unitPrice = Number(itemObj?.sellingPrice || 0);
+              const subtotal = quantity * unitPrice;
+              const availableStock = Math.max(quantity, Number(itemObj?.quantity ?? r.currentStock ?? 10));
+
+              return {
+                id: String(partId),
+                part: rawItemId && /^[0-9a-fA-F]{24}$/.test(String(rawItemId)) ? String(rawItemId) : undefined,
+                partName,
+                partCode,
+                quantity,
+                unitPrice,
+                subtotal,
+                availableStock,
+                discount: 0,
+              };
+            });
+
+            setParts(sprParts);
+            toast.success(`Automatically loaded ${sprParts.length} part(s) from spare parts requests`);
+          }
+        } catch (sprErr) {
+          console.error('Error fetching spare parts requests:', sprErr);
+        }
+      }
+    } catch (err) {
+      console.error('Error populating inspection parts:', err);
+    }
+  };
+
+  const handleSelectJobCard = async (jc: JobCard) => {
+    setSelectedJobCard(jc);
+    setShowJobCardModal(false);
+    await populatePartsFromJobCard(jc);
+  };
 
   const fetchJobCards = async () => {
     setIsLoading(true);
@@ -51,11 +169,38 @@ export const GenerateQuotationPage: React.FC = () => {
           jc.status !== 'delivered' && jc.status !== 'cancelled'
         );
         setJobCards(activeJobs);
+        if (quotationId) {
+          const response = await quotationApi.getQuotationById(quotationId);
+          const q = response.data;
+          if (q.status !== 'draft') throw new Error('Only draft quotations can be edited');
+          const job = activeJobs.find((j: JobCard) => (j._id || j.id) === (q.jobCard?._id || q.jobCard?.id || q.jobCard));
+          setSelectedJobCard(job || { ...q.jobCard, customer: q.customer, vehicle: q.vehicle });
+          setQuotationNumber(q.quotationNumber);
+          setQuotationDate(dayjs(q.createdAt).format('YYYY-MM-DD'));
+          setParts(q.items.map((item: any) => ({ id: item.part?._id || item.part?.id || item.part || item._id,
+            part: item.part?._id || item.part?.id || item.part, discount: item.discount || 0,
+            partName: item.name, partCode: item.part?.itemCode || '', quantity: item.quantity,
+            unitPrice: item.unitPrice, subtotal: item.total, availableStock: Math.max(item.quantity, item.part?.quantity || 0) })));
+          setLaborCharge(q.laborCharge); setEstimatedHours(q.estimatedHours);
+          setDiscount(q.discount || 0); setTaxRate(q.taxRate || 0); setRemarks(q.notes || '');
+        } else {
+          // Check if a job card was provided via URL query parameters
+          const targetJobCardId = searchParams.get('jobCard') || searchParams.get('jobCardId');
+          if (targetJobCardId) {
+            const matchedJob = activeJobs.find((j: JobCard) =>
+              (j._id || j.id || j.jobCardNumber) === targetJobCardId
+            );
+            if (matchedJob) {
+              setSelectedJobCard(matchedJob);
+              await populatePartsFromJobCard(matchedJob);
+            }
+          }
+        }
       } else {
         setError(res.message || 'Failed to load job cards');
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Error loading job cards');
+      setError(err.response?.data?.message || err.message || 'Error loading job cards');
     } finally {
       setIsLoading(false);
     }
@@ -63,7 +208,7 @@ export const GenerateQuotationPage: React.FC = () => {
 
   useEffect(() => {
     fetchJobCards();
-  }, []);
+  }, [quotationId, searchParams]);
 
   const getCustomerName = (jobCard: JobCard) => {
     const customer = jobCard.customer;
@@ -81,8 +226,66 @@ export const GenerateQuotationPage: React.FC = () => {
     return 'Unknown';
   };
 
-  const addPart = (newPart: QuotationPart) => {
-    setParts([...parts, newPart]);
+  const fetchInventoryItems = async () => {
+    setIsLoadingParts(true);
+    try {
+      const res = await inventoryApi.getInventoryItems({ limit: 100 });
+      if (res.success) {
+        setInventoryItems((res.data || []).filter((item: InventoryItemOption) => item.quantity > 0));
+      } else {
+        toast.error(res.message || 'Failed to load inventory parts');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Error loading inventory parts');
+    } finally {
+      setIsLoadingParts(false);
+    }
+  };
+
+  const openPartModal = () => {
+    setPartSearch('');
+    setShowPartModal(true);
+    fetchInventoryItems();
+  };
+
+  const addInventoryPart = (item: InventoryItemOption) => {
+    const partId = item._id || item.id;
+    if (!partId) {
+      toast.error('Invalid inventory item');
+      return;
+    }
+
+    if (parts.some((part) => part.id === partId)) {
+      toast.error('This part is already added');
+      return;
+    }
+
+    const unitPrice = Number(item.sellingPrice || 0);
+    setParts((currentParts) => [
+      ...currentParts,
+      {
+        id: partId,
+        part: partId,
+        partName: item.itemName,
+        partCode: item.itemCode,
+        quantity: 1,
+        unitPrice,
+        subtotal: unitPrice,
+        availableStock: Number(item.quantity || 0),
+      },
+    ]);
+    setShowPartModal(false);
+    toast.success(`${item.itemName} added`);
+  };
+
+  const updatePartQuantity = (partId: string, requestedQuantity: number) => {
+    setParts((currentParts) =>
+      currentParts.map((part) => {
+        if (part.id !== partId) return part;
+        const quantity = Math.max(1, Math.min(requestedQuantity || 1, part.availableStock));
+        return { ...part, quantity, subtotal: quantity * part.unitPrice - (part.discount || 0) };
+      })
+    );
   };
 
   const removePart = (partId: string) => {
@@ -90,79 +293,78 @@ export const GenerateQuotationPage: React.FC = () => {
   };
 
   const calculatePartsTotal = () => {
-    return parts.reduce((sum, part) => sum + part.subtotal, 0);
+    return Math.round((parts.reduce((sum, part) => sum + Math.round((part.subtotal + Number.EPSILON) * 100) / 100, 0) + Number.EPSILON) * 100) / 100;
   };
 
   const calculateLaborCost = () => {
-    return laborCharge * estimatedHours;
+    return Math.round((laborCharge * estimatedHours + Number.EPSILON) * 100) / 100;
   };
 
   const calculateGrandTotal = () => {
-    return calculatePartsTotal() + calculateLaborCost() - discount;
+    const subtotal = Math.round((calculatePartsTotal() + calculateLaborCost() + Number.EPSILON) * 100) / 100;
+    const tax = Math.round((((subtotal - discount) * taxRate / 100) + Number.EPSILON) * 100) / 100;
+    return Math.round((subtotal - discount + tax + Number.EPSILON) * 100) / 100;
   };
 
-  const handleSaveDraft = async () => {
-    if (!selectedJobCard) {
-      toast.error('Please select a job card');
-      return;
+  const getEntityId = (entity: any) => {
+    if (!entity) return '';
+    if (typeof entity === 'string') return entity;
+    return entity._id || entity.id || '';
+  };
+
+  const buildQuotationData = () => {
+    if (!selectedJobCard) return null;
+
+    return {
+      customer: getEntityId(selectedJobCard.customer),
+      vehicle: getEntityId(selectedJobCard.vehicle),
+      jobCard: selectedJobCard._id || selectedJobCard.id,
+      items: parts.map((part) => ({
+        part: part.part && /^[0-9a-fA-F]{24}$/.test(String(part.part)) ? String(part.part) : undefined,
+        name: part.partName,
+        quantity: part.quantity,
+        unitPrice: part.unitPrice,
+        discount: part.discount || 0,
+        total: part.subtotal,
+      })),
+      laborCharge,
+      estimatedHours,
+      discount,
+      taxRate,
+      notes: remarks,
+    };
+  };
+
+  const saveQuotation = async (mode: 'draft' | 'review' | 'submit') => {
+    if (isSaving) return;
+    const data = buildQuotationData();
+    if (!data?.customer || !data.vehicle || !data.jobCard) { toast.error('Please select a valid job card'); return; }
+    if ([laborCharge, estimatedHours, discount, taxRate].some(v => !Number.isFinite(v) || v < 0) || taxRate > 100 || discount > calculatePartsTotal() + calculateLaborCost()) {
+      toast.error('Enter valid non-negative charges and a discount no greater than the subtotal'); return;
     }
-    
+    setIsSaving(true);
     try {
-      const quotationData = {
-        jobCardId: selectedJobCard._id || selectedJobCard.id,
-        quotationNumber,
-        date: quotationDate,
-        parts,
-        laborCharge,
-        estimatedHours,
-        discount,
-        remarks,
-        status: 'draft',
-      };
+      const res = quotationId ? await quotationApi.updateQuotation(quotationId, data) : await quotationApi.createQuotation(data);
+      if (!res.success) { toast.error(res.message || 'Failed to save quotation'); return; }
       
-      const res = await quotationApi.createQuotation(quotationData);
-      
-      if (res.success) {
+      const newId = res.data._id || res.data.id;
+      if (mode === 'submit') {
+        const subRes = await quotationApi.submitQuotation(newId);
+        if (subRes.success) {
+          toast.success(subRes.message || 'Quotation saved and submitted to customer!');
+        } else {
+          toast.error(subRes.message || 'Saved, but could not submit to customer');
+        }
+        navigate('/manager/quotations/' + newId);
+      } else if (mode === 'review') {
+        toast.success('Quotation saved');
+        navigate('/manager/quotations/' + newId);
+      } else {
         toast.success('Quotation saved as draft');
         navigate('/manager/quotations');
-      } else {
-        setError(res.message || 'Failed to save quotation');
       }
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Error saving quotation');
-    }
-  };
-
-  const handleSaveAndReview = async () => {
-    if (!selectedJobCard) {
-      toast.error('Please select a job card');
-      return;
-    }
-    
-    try {
-      const quotationData = {
-        jobCardId: selectedJobCard._id || selectedJobCard.id,
-        quotationNumber,
-        date: quotationDate,
-        parts,
-        laborCharge,
-        estimatedHours,
-        discount,
-        remarks,
-        status: 'review',
-      };
-      
-      const res = await quotationApi.createQuotation(quotationData);
-      
-      if (res.success) {
-        toast.success('Quotation saved and ready for review');
-        navigate(`/manager/quotations/${res.data._id || res.data.id}`);
-      } else {
-        setError(res.message || 'Failed to save quotation');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Error saving quotation');
-    }
+    } catch (err: any) { toast.error(err.response?.data?.message || 'Error saving quotation'); }
+    finally { setIsSaving(false); }
   };
 
   if (isLoading) return <LoadingSkeleton />;
@@ -175,7 +377,7 @@ export const GenerateQuotationPage: React.FC = () => {
           <ArrowLeft className="w-5 h-5 text-slate-600" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Generate Quotation</h1>
+          <h1 className="text-2xl font-bold text-slate-900">{quotationId ? 'Edit Quotation' : 'Generate Quotation'}</h1>
           <p className="text-sm text-slate-500">Create a quotation from an active Job Card.</p>
         </div>
       </div>
@@ -257,7 +459,7 @@ export const GenerateQuotationPage: React.FC = () => {
         <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">PARTS & MATERIALS</h3>
         
         <button
-          onClick={() => setShowPartModal(true)}
+          onClick={openPartModal}
           className="mb-4 flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-xl text-sm hover:bg-slate-50"
         >
           <Plus className="w-4 h-4" />
@@ -282,7 +484,16 @@ export const GenerateQuotationPage: React.FC = () => {
                   <tr key={part.id} className="border-b border-slate-100">
                     <td className="py-2 px-3 text-sm text-slate-900">{part.partName}</td>
                     <td className="py-2 px-3 text-sm text-slate-600">{part.availableStock}</td>
-                    <td className="py-2 px-3 text-sm text-slate-600">{part.quantity}</td>
+                    <td className="py-2 px-3">
+                      <input
+                        type="number"
+                        min={1}
+                        max={part.availableStock}
+                        value={part.quantity}
+                        onChange={(e) => updatePartQuantity(part.id, Number(e.target.value))}
+                        className="w-20 px-2 py-1 border border-slate-200 rounded-lg text-sm"
+                      />
+                    </td>
                     <td className="py-2 px-3 text-sm text-slate-600">{part.unitPrice.toLocaleString()}</td>
                     <td className="py-2 px-3 text-sm text-slate-900 font-medium">{part.subtotal.toLocaleString()}</td>
                     <td className="py-2 px-3">
@@ -303,32 +514,46 @@ export const GenerateQuotationPage: React.FC = () => {
           </div>
         )}
 
-        <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">LABOR</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-bold text-slate-500 uppercase">LABOR</h3>
+          <span className="text-xs text-slate-400 font-normal">Formula: Hourly Rate × Estimated Hours</span>
+        </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Labor Charge</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Labor Charge (Hourly Rate - Rs./hr)</label>
             <input
               type="number"
+              min={0}
               value={laborCharge}
               onChange={(e) => setLaborCharge(Number(e.target.value))}
-              className="w-full px-4 py-2 border border-slate-200 rounded-xl"
+              className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
+              placeholder="e.g. 10000"
             />
+            <p className="text-xs text-slate-400 mt-1">Rate charged per labor hour</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Estimated Hours</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Estimated Hours (hrs)</label>
             <input
               type="number"
+              min={0}
               step="0.5"
               value={estimatedHours}
               onChange={(e) => setEstimatedHours(Number(e.target.value))}
-              className="w-full px-4 py-2 border border-slate-200 rounded-xl"
+              className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
+              placeholder="e.g. 4.5"
             />
+            <p className="text-xs text-slate-400 mt-1">Estimated duration to complete work</p>
           </div>
         </div>
 
-        <div className="text-right mb-6 text-sm text-slate-600">
-          Labor Cost: {calculateLaborCost().toLocaleString()}
+        <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded-xl mb-6 text-sm">
+          <span className="text-slate-600">
+            Labor Calculation: <span className="font-semibold text-slate-800">Rs. {laborCharge.toLocaleString()}</span> × <span className="font-semibold text-slate-800">{estimatedHours} hrs</span>
+          </span>
+          <span className="font-bold text-slate-900 text-base">
+            Labor Cost: Rs. {calculateLaborCost().toLocaleString()}
+          </span>
         </div>
 
         <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">PRICE SUMMARY</h3>
@@ -352,6 +577,7 @@ export const GenerateQuotationPage: React.FC = () => {
                 className="w-24 px-2 py-1 border border-slate-200 rounded text-right text-sm"
               />
             </div>
+            <div className="flex justify-between"><span>Tax (%)</span><input type="number" min="0" max="100" value={taxRate} onChange={e => setTaxRate(Number(e.target.value))} className="w-24 px-2 py-1 border rounded text-right" /></div>
             <div className="border-t border-slate-300 pt-2 mt-2">
               <div className="flex justify-between font-bold text-lg">
                 <span className="text-slate-900">GRAND TOTAL</span>
@@ -378,15 +604,19 @@ export const GenerateQuotationPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-6 border-t border-slate-200">
-          <Link to="/manager/quotations" className="px-6 py-2 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50">Cancel</Link>
-          <button onClick={handleSaveDraft} className="px-6 py-2 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-2">
+        <div className="flex flex-wrap justify-end gap-3 pt-6 border-t border-slate-200">
+          <Link to="/manager/quotations" className="px-5 py-2 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 text-sm font-medium">Cancel</Link>
+          <button disabled={isSaving} onClick={() => saveQuotation('draft')} className="px-5 py-2 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 flex items-center gap-2 text-sm font-medium">
             <Save className="w-4 h-4" />
             Save Draft
           </button>
-          <button onClick={handleSaveAndReview} className="px-6 py-2 bg-brand-600 text-white rounded-xl hover:bg-brand-700 flex items-center gap-2">
+          <button disabled={isSaving} onClick={() => saveQuotation('review')} className="px-5 py-2 border border-brand-200 bg-brand-50 text-brand-700 rounded-xl hover:bg-brand-100 flex items-center gap-2 text-sm font-semibold">
             <Save className="w-4 h-4" />
             Save & Review
+          </button>
+          <button disabled={isSaving} onClick={() => saveQuotation('submit')} className="px-5 py-2 bg-brand-600 text-white rounded-xl hover:bg-brand-700 flex items-center gap-2 text-sm font-semibold shadow-xs">
+            <Send className="w-4 h-4" />
+            Save & Submit to Customer
           </button>
         </div>
       </div>
@@ -397,38 +627,130 @@ export const GenerateQuotationPage: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full p-6 max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-slate-900">Select Job Card</h3>
-              <button onClick={() => setShowJobCardModal(false)} className="text-slate-400 hover:text-slate-600">
-                <FileText className="w-5 h-5" />
+              <button onClick={() => setShowJobCardModal(false)} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors">
+                <X className="w-5 h-5" />
               </button>
             </div>
             
             <div className="mb-4">
               <input
                 type="text"
+                value={jobSearch}
+                onChange={(e) => setJobSearch(e.target.value)}
                 placeholder="Search Job Card / Customer / Registration Number"
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg"
+                className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 focus:outline-none text-sm"
               />
             </div>
             
             <div className="space-y-3">
-              {jobCards.map((jc) => (
+              {jobCards.filter(jc => [jc.jobCardNumber, getCustomerName(jc), getVehicleInfo(jc)].join(' ').toLowerCase().includes(jobSearch.toLowerCase())).map((jc) => (
                 <div
-                  key={jc.id}
-                  onClick={() => { setSelectedJobCard(jc); setShowJobCardModal(false); }}
-                  className="p-4 border border-slate-200 rounded-xl hover:bg-slate-50 cursor-pointer"
+                  key={jc._id || jc.id}
+                  onClick={() => handleSelectJobCard(jc)}
+                  className="p-4 border border-slate-200 rounded-xl hover:bg-slate-50 cursor-pointer transition-colors"
                 >
-                  <p className="font-bold text-slate-900">{jc.jobCardNumber}</p>
-                  <p className="text-sm text-slate-600">👤 {getCustomerName(jc)}</p>
+                  <div className="flex items-center justify-between">
+                    <p className="font-bold text-slate-900">{jc.jobCardNumber}</p>
+                    {jc.parts && jc.parts.length > 0 && (
+                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
+                        {jc.parts.length} Inspected Part{jc.parts.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate-600 mt-1">👤 {getCustomerName(jc)}</p>
                   <p className="text-sm text-slate-600">🚗 {getVehicleInfo(jc)}</p>
-                  <p className="text-sm text-slate-600">🔧 {jc.complaint}</p>
-                  <p className="text-sm text-slate-600">Status: {jc.status}</p>
-                  <p className="text-sm text-slate-600">Estimated Cost: {jc.estimatedCost?.toLocaleString()}</p>
+                  {jc.complaint && <p className="text-sm text-slate-600">🔧 {jc.complaint}</p>}
+                  {jc.inspectionNotes && <p className="text-xs text-brand-600 mt-1">📋 Inspection: {jc.inspectionNotes}</p>}
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 text-xs text-slate-500">
+                    <span>Status: <span className="capitalize font-medium text-slate-700">{jc.status.replace(/_/g, ' ')}</span></span>
+                    <span>Estimated Cost: Rs. {(jc.estimatedCost || 0).toLocaleString()}</span>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         </div>
       )}
+
+      {/* Part Selection Modal */}
+      {showPartModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full p-6 max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Select Part</h3>
+                <p className="text-sm text-slate-500">Choose an available item from inventory.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPartModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-2xl leading-none"
+                aria-label="Close part selector"
+              >
+                ×
+              </button>
+            </div>
+
+            <input
+              type="text"
+              value={partSearch}
+              onChange={(e) => setPartSearch(e.target.value)}
+              placeholder="Search by part name, code, category or brand"
+              className="w-full px-4 py-2 border border-slate-200 rounded-lg mb-4"
+            />
+
+            {isLoadingParts ? (
+              <div className="py-10 text-center text-slate-500">Loading inventory parts...</div>
+            ) : (
+              <div className="space-y-3">
+                {inventoryItems
+                  .filter((item) => {
+                    const search = partSearch.trim().toLowerCase();
+                    if (!search) return true;
+                    return [item.itemName, item.itemCode, item.category, item.brand]
+                      .filter(Boolean)
+                      .some((value) => String(value).toLowerCase().includes(search));
+                  })
+                  .map((item) => {
+                    const inventoryId = item._id || item.id;
+                    const alreadyAdded = inventoryId ? parts.some((part) => part.id === inventoryId) : false;
+                    return (
+                      <div
+                        key={inventoryId || item.itemCode}
+                        className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-4 border border-slate-200 rounded-xl"
+                      >
+                        <div>
+                          <p className="font-semibold text-slate-900">{item.itemName}</p>
+                          <p className="text-sm text-slate-500">
+                            {item.itemCode}
+                            {item.category ? ` • ${item.category}` : ''}
+                            {item.brand ? ` • ${item.brand}` : ''}
+                          </p>
+                          <p className="text-sm text-slate-600 mt-1">
+                            Stock: {item.quantity} • Selling Price: Rs. {Number(item.sellingPrice || 0).toLocaleString()}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={alreadyAdded}
+                          onClick={() => addInventoryPart(item)}
+                          className="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {alreadyAdded ? 'Added' : 'Add'}
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                {inventoryItems.length === 0 && (
+                  <div className="py-10 text-center text-slate-500">No available parts found in inventory.</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

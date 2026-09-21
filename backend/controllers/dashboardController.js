@@ -14,6 +14,12 @@ import SupplierPayment from '../models/SupplierPayment.js';
 import Attendance from '../models/Attendance.js';
 import dayjs from 'dayjs';
 
+const workshopStatuses = [
+  'pending', 'inspection_started', 'inspection_complete', 'diagnosing',
+  'repair_started', 'waiting_for_parts', 'repair_in_progress', 'testing',
+  'work_complete', 'road_test_pending', 'ready_for_delivery',
+];
+
 export const getAdminSummary = async (req, res) => {
   try {
     const now = dayjs();
@@ -40,7 +46,13 @@ export const getAdminSummary = async (req, res) => {
       User.countDocuments({ role: 'manager', isActive: true }),
       User.countDocuments({ role: 'employee', isActive: true }),
       User.countDocuments({ role: 'customer', isActive: true }),
-      Supplier.countDocuments({ status: 'active' }),
+      Supplier.countDocuments({
+        $or: [
+          { isActive: true },
+          { status: 'active' },
+          { isActive: { $ne: false } },
+        ],
+      }),
       InventoryItem.countDocuments({ status: 'active' }),
       InventoryItem.countDocuments({
         status: 'active',
@@ -101,7 +113,7 @@ export const getManagerSummary = async (req, res) => {
 
     const [
       todaysAppointments,
-      vehiclesInWorkshop,
+      workshopVehicleIds,
       pendingJobCards,
       waitingForParts,
       readyForDelivery,
@@ -115,7 +127,10 @@ export const getManagerSummary = async (req, res) => {
         preferredDate: { $gte: todayStart, $lte: todayEnd },
         status: { $in: ['pending', 'approved'] },
       }),
-      JobCard.countDocuments({ status: { $in: ['diagnosing', 'repair_in_progress', 'testing', 'waiting_for_parts'] } }),
+      JobCard.distinct('vehicle', {
+        status: { $in: workshopStatuses },
+        vehicle: { $ne: null },
+      }),
       JobCard.countDocuments({ status: 'pending' }),
       JobCard.countDocuments({ status: 'waiting_for_parts' }),
       JobCard.countDocuments({ status: 'ready_for_delivery' }),
@@ -142,7 +157,7 @@ export const getManagerSummary = async (req, res) => {
       success: true,
       data: {
         todaysAppointments,
-        vehiclesInWorkshop,
+        vehiclesInWorkshop: workshopVehicleIds.length,
         pendingJobCards,
         waitingForParts,
         readyForDelivery,
@@ -374,7 +389,7 @@ export const getWorkshopBays = async (req, res) => {
     const todayEnd = dayjs().endOf('day').toDate();
 
     const activeJobCards = await JobCard.find({
-      status: { $in: ['diagnosing', 'repair_in_progress', 'testing', 'waiting_for_parts'] },
+      status: { $in: workshopStatuses },
     })
       .populate('vehicle')
       .populate({ path: 'customer', populate: { path: 'user', select: 'firstName lastName' } })
@@ -386,8 +401,11 @@ export const getWorkshopBays = async (req, res) => {
       if (jobCard) {
         workshopBays.push({
           id: i,
-          status: jobCard.status === 'waiting_for_parts' ? 'Parts' : 
-                 jobCard.status === 'testing' ? 'Testing' : 'Repair',
+          status: jobCard.status === 'waiting_for_parts' ? 'Parts' :
+                 ['testing', 'road_test_pending'].includes(jobCard.status) ? 'Testing' :
+                 jobCard.status === 'pending' ? 'Pending' :
+                 ['inspection_started', 'inspection_complete', 'diagnosing'].includes(jobCard.status) ? 'Inspection' :
+                 ['work_complete', 'ready_for_delivery'].includes(jobCard.status) ? 'Ready' : 'Repair',
           vehicle: jobCard.vehicle?.registrationNumber || 'Unknown',
           customer: jobCard.customer?.user ? 
                    `${jobCard.customer.user.firstName} ${jobCard.customer.user.lastName}` : 'Unknown',

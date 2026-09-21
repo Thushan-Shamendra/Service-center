@@ -27,9 +27,9 @@ router
   .put(authorize('administrator', 'manager'), updateQuotation)
   .delete(authorize('administrator', 'manager'), deleteQuotation);
 
-router.put('/:id/submit', submitQuotation);
-router.put('/:id/approve', authorize('administrator', 'manager'), approveQuotation);
-router.put('/:id/reject', authorize('administrator', 'manager'), rejectQuotation);
+router.put('/:id/submit', authorize('administrator', 'manager'), submitQuotation);
+router.put('/:id/approve', authorize('administrator', 'manager', 'customer'), approveQuotation);
+router.put('/:id/reject', authorize('administrator', 'manager', 'customer'), rejectQuotation);
 router.post('/:id/convert', authorize('administrator', 'manager'), convertToInvoice);
 router.post('/:id/convert-to-invoice', authorize('administrator', 'manager'), convertToInvoice);
 

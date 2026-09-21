@@ -5,6 +5,7 @@ import RoadTest from '../models/RoadTest.js';
 import SparePartsRequest from '../models/SparePartsRequest.js';
 import FinalInspectionReport from '../models/FinalInspectionReport.js';
 import Employee from '../models/Employee.js';
+import InventoryItem from '../models/InventoryItem.js';
 import ServiceTimeline from '../models/ServiceTimeline.js';
 import Notification from '../models/Notification.js';
 
@@ -22,7 +23,7 @@ export const getRepairProgress = async (req, res) => {
         path: 'assignedTechnician', 
         populate: { path: 'user', select: 'firstName lastName' }
       })
-      .populate({ path: 'parts.item', select: 'name itemCode currentStock unit' });
+      .populate({ path: 'parts.item', select: 'itemName itemCode quantity unit sellingPrice' });
 
     if (!jobCard) {
       return res.status(404).json({ success: false, message: 'Job card not found' });
@@ -37,7 +38,7 @@ export const getRepairProgress = async (req, res) => {
         .populate('technician', 'firstName lastName')
         .sort({ createdAt: -1 }),
       SparePartsRequest.find({ jobCard: jobCard._id })
-        .populate('item', 'name itemCode')
+        .populate('item', 'itemName itemCode quantity unit')
         .sort({ createdAt: -1 }),
       FinalInspectionReport.findOne({ jobCard: jobCard._id })
         .populate('approvedBy', 'firstName lastName')
@@ -114,6 +115,9 @@ export const updateRepairStatus = async (req, res) => {
     }
 
     // Update job card status
+    if (status === 'inspection_complete' && !jobCard.inspectionDate) {
+      jobCard.inspectionDate = new Date();
+    }
     jobCard.status = status;
     jobCard.statusHistory.push({
       status,
@@ -179,7 +183,7 @@ export const updateRepairStatus = async (req, res) => {
         user: jobCard.customer.user,
         title: `Repair Progress Update (${jobCard.jobCardNumber})`,
         description: `Your vehicle repair status is now: ${status.replace(/_/g, ' ')}.`,
-        type: 'repair_update',
+        type: 'service_update',
       });
     }
 
@@ -235,9 +239,21 @@ export const addWorkPerformed = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Job card not found' });
     }
 
-    if (workItems && Array.isArray(workItems)) {
-      jobCard.workPerformed = [...(jobCard.workPerformed || []), ...workItems];
+    const normalizedWorkItems = Array.isArray(workItems)
+      ? workItems
+          .filter(item => typeof item === 'string')
+          .map(item => item.trim())
+          .filter(Boolean)
+      : [];
+
+    if (normalizedWorkItems.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one work item is required',
+      });
     }
+
+    jobCard.workPerformed = [...(jobCard.workPerformed || []), ...normalizedWorkItems];
 
     if (progress !== undefined) {
       jobCard.progress = Math.min(100, Math.max(0, progress));

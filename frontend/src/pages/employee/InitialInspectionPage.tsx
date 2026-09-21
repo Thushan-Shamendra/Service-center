@@ -21,6 +21,11 @@ import {
   Package,
 } from 'lucide-react';
 
+const parseInspectionCost = (value: string): number => {
+  const amount = Number(value.replace(/,/g, '').trim());
+  return Number.isFinite(amount) ? amount : 0;
+};
+
 export const InitialInspectionPage: React.FC = () => {
   const navigate = useNavigate();
   const { jobCardId } = useParams<{ jobCardId: string }>();
@@ -138,7 +143,7 @@ export const InitialInspectionPage: React.FC = () => {
 
   // Calculate total estimated cost from cost breakdown items
   const totalEstimatedCost = inspectionData.costBreakdown.reduce((sum, item) => {
-    const cost = parseFloat(item.cost) || 0;
+    const cost = parseInspectionCost(item.cost);
     const qty = item.quantity || 1;
     return sum + (cost * qty);
   }, 0);
@@ -185,8 +190,8 @@ export const InitialInspectionPage: React.FC = () => {
             item: item.itemId || null, // CRITICAL: Include InventoryItem reference
             name: item.item,
             quantity: item.quantity || 1,
-            unitPrice: parseFloat(item.cost) || 0,
-            total: (parseFloat(item.cost) || 0) * (item.quantity || 1),
+            unitPrice: parseInspectionCost(item.cost),
+            total: parseInspectionCost(item.cost) * (item.quantity || 1),
           }));
 
         console.log('Saving parts to job card:', parts);
@@ -226,8 +231,8 @@ export const InitialInspectionPage: React.FC = () => {
             item: item.itemId || null, // CRITICAL: Include InventoryItem reference
             name: item.item,
             quantity: item.quantity || 1,
-            unitPrice: parseFloat(item.cost) || 0,
-            total: (parseFloat(item.cost) || 0) * (item.quantity || 1),
+            unitPrice: parseInspectionCost(item.cost),
+            total: parseInspectionCost(item.cost) * (item.quantity || 1),
           }));
 
         console.log('Completing inspection with parts:', parts);
@@ -546,7 +551,7 @@ export const InitialInspectionPage: React.FC = () => {
                   placeholder="0"
                 />
                 <span className="text-xs font-bold text-slate-700 w-24 text-right">
-                  = LKR {((parseFloat(item.cost) || 0) * (item.quantity || 1)).toLocaleString()}
+                  = LKR {(parseInspectionCost(item.cost) * (item.quantity || 1)).toLocaleString()}
                 </span>
                 <button
                   onClick={() => {

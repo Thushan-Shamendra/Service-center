@@ -56,13 +56,50 @@ export const CreateInvoicePage: React.FC = () => {
     const loadOptions = async () => {
       setIsLoading(true);
       try {
-        const [jcRes, custRes, vehRes] = await Promise.all([
-          jobCardApi.getJobCards({ limit: 100 }),
+        const [jcRes, custRes, vehRes, invRes] = await Promise.all([
+          jobCardApi.getJobCards({ limit: 100, status: 'active', uninvoiced: 'true' }),
           customerApi.getCustomers({ limit: 100 }),
           vehicleApi.getVehicles({ limit: 100 }),
+          invoiceApi.getInvoices({ limit: 500 }).catch(() => ({ success: false, data: [] })),
         ]);
 
-        if (jcRes.success) setJobCards(jcRes.data || []);
+        let loadedJobCards: any[] = [];
+        if (jcRes.success && Array.isArray(jcRes.data)) {
+          loadedJobCards = jcRes.data;
+        }
+
+        // Collect IDs of job cards that already have an active/draft/sent/paid invoice
+        const existingInvoices: any[] = (invRes?.success && Array.isArray(invRes.data)) ? invRes.data : [];
+        const invoicedJobCardIds = new Set<string>();
+        existingInvoices.forEach((inv: any) => {
+          if (inv.status !== 'cancelled' && inv.jobCard) {
+            const jcId = typeof inv.jobCard === 'object' ? (inv.jobCard._id || inv.jobCard.id) : inv.jobCard;
+            if (jcId) invoicedJobCardIds.add(String(jcId));
+          }
+        });
+
+        // Only display active job cards (not delivered, not cancelled, and not already invoiced unless prefilled)
+        let filteredJobs = loadedJobCards.filter((jc: any) => {
+          const jcId = String(jc._id || jc.id);
+          if (prefilledJobCardId && jcId === prefilledJobCardId) return true;
+          const isNotClosed = jc.status !== 'delivered' && jc.status !== 'cancelled';
+          const isNotInvoiced = !invoicedJobCardIds.has(jcId);
+          return isNotClosed && isNotInvoiced;
+        });
+
+        // If a specific jobCard was prefilled from URL, ensure it is available in options
+        if (prefilledJobCardId && !filteredJobs.some(j => (j._id || j.id) === prefilledJobCardId)) {
+          try {
+            const singleJcRes = await jobCardApi.getJobCardById(prefilledJobCardId);
+            if (singleJcRes.success && singleJcRes.data) {
+              filteredJobs = [singleJcRes.data, ...filteredJobs];
+            }
+          } catch (e) {
+            console.error('Error fetching prefilled job card:', e);
+          }
+        }
+
+        setJobCards(filteredJobs);
         if (custRes.success) setCustomers(custRes.data || []);
         if (vehRes.success) setVehicles(vehRes.data || []);
       } catch (err) {
@@ -73,7 +110,7 @@ export const CreateInvoicePage: React.FC = () => {
     };
 
     loadOptions();
-  }, []);
+  }, [prefilledJobCardId]);
 
   // When job card selection changes, pre-fill customer & vehicle & parts
   useEffect(() => {
@@ -93,7 +130,7 @@ export const CreateInvoicePage: React.FC = () => {
       // Pre-fill parts if job card has parts
       if (jc.parts && Array.isArray(jc.parts) && jc.parts.length > 0) {
         const formattedParts: Item[] = jc.parts.map((p: any) => ({
-          description: p.partName || p.description || 'Spare Part',
+          description: p.name || p.item?.itemName || p.item?.name || p.partName || p.description || 'Spare Part',
           quantity: p.quantity || 1,
           unitPrice: p.unitPrice || p.price || 0,
           discount: 0,
@@ -171,7 +208,7 @@ export const CreateInvoicePage: React.FC = () => {
         discount: Number(discount) || 0,
         taxRate: Number(taxRate) || 0,
         remarks,
-        status: 'approved',
+        status: 'draft',
       };
 
       const res = await invoiceApi.createInvoice(payload);
@@ -214,21 +251,36 @@ export const CreateInvoicePage: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Associated Job Card (Optional)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-slate-700">
+                  Associated Job Card (Optional)
+                </label>
+                <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  Active Only
+                </span>
+              </div>
               <select
                 value={selectedJobCardId}
                 onChange={(e) => setSelectedJobCardId(e.target.value)}
-                className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 text-sm"
+                className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-500 text-sm bg-white"
               >
-                <option value="">Select Job Card</option>
-                {jobCards.map((jc) => (
-                  <option key={jc._id || jc.id} value={jc._id || jc.id}>
-                    {jc.jobCardNumber} - {jc.vehicle?.registrationNumber || 'Vehicle'}
-                  </option>
-                ))}
+                <option value="">Select Active Job Card</option>
+                {jobCards.map((jc) => {
+                  const statusLabel = jc.status
+                    ? jc.status.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+                    : 'Active';
+                  return (
+                    <option key={jc._id || jc.id} value={jc._id || jc.id}>
+                      {jc.jobCardNumber} - {jc.vehicle?.registrationNumber || 'Vehicle'} ({statusLabel})
+                    </option>
+                  );
+                })}
               </select>
+              {jobCards.length === 0 && !isLoading && (
+                <p className="text-xs text-slate-400 mt-1">
+                  No uninvoiced active job cards available.
+                </p>
+              )}
             </div>
 
             <div>

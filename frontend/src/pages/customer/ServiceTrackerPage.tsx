@@ -200,6 +200,22 @@ export const ServiceTrackerPage: React.FC = () => {
   };
 
   const getProgressPercentage = (status: string) => {
+    // Match backend workflow values for jobs saved before progress was synchronized.
+    const workflowProgress: Record<string, number> = {
+      pending: 0,
+      inspection_started: 10,
+      inspection_complete: 20,
+      repair_started: 35,
+      waiting_for_parts: 40,
+      repair_in_progress: 70,
+      testing: 90,
+      work_complete: 100,
+      road_test_pending: 90,
+      ready_for_delivery: 95,
+      delivered: 100,
+      cancelled: 0,
+    };
+    if (status in workflowProgress) return workflowProgress[status];
     const stage = STATUS_STAGES.find(s => s.key === status);
     return stage?.progress || 0;
   };

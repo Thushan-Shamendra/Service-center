@@ -36,6 +36,7 @@ export const PartsRequestsPage: React.FC = () => {
   const [requests, setRequests] = useState<PartsRequest[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
   
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -59,6 +60,7 @@ export const PartsRequestsPage: React.FC = () => {
   const fetchPartsRequests = async () => {
     setIsLoading(true);
     setError(null);
+    setStatsError(null);
     
     try {
       // Fetch requests and stats independently so one failure doesn't block the other
@@ -66,15 +68,19 @@ export const PartsRequestsPage: React.FC = () => {
       
       if (requestsRes.success) {
         setRequests(requestsRes.data || []);
+      } else {
+        setError(requestsRes.message || 'Failed to load parts requests');
       }
     } catch (err: any) {
       console.error('Error loading parts requests:', err);
       setRequests([]);
+      setError(err.response?.data?.message || 'Failed to load parts requests');
     }
     
     // Fetch stats separately - if this fails, still show the requests table
     try {
       const statsRes = await partsRequestApi.getPartsRequestStats();
+      if (!statsRes.success) throw new Error('Failed to load request summary');
       if (statsRes.success) {
         setStats(statsRes.data || {
           pending: 0,
@@ -86,7 +92,7 @@ export const PartsRequestsPage: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Error loading parts request stats:', err);
-      // Keep default zero stats
+      setStatsError('Request summary could not be loaded. Refresh the page to retry.');
     } finally {
       setIsLoading(false);
     }
@@ -142,7 +148,7 @@ export const PartsRequestsPage: React.FC = () => {
 
   const getTechnicianName = (request: PartsRequest) => {
     const technician = request.technician;
-    if (typeof technician === 'object') {
+    if (technician && typeof technician === 'object') {
       // Handle both populated shapes: { user: { firstName } } or { firstName }
       if (technician.user) {
         return `${technician.user.firstName || ''} ${technician.user.lastName || ''}`.trim() || 'Unknown';
@@ -223,6 +229,7 @@ export const PartsRequestsPage: React.FC = () => {
         </Link>
       </div>
 
+      {statsError && <div role="alert" className="rounded-xl bg-amber-50 p-4 text-amber-800">{statsError}</div>}
       {/* Stats Cards - Row 1 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border border-slate-100 shadow-card p-4">
@@ -230,7 +237,7 @@ export const PartsRequestsPage: React.FC = () => {
             <AlertTriangle className="w-5 h-5 text-rose-600" />
             <span className="text-xs text-slate-500">Pending</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900">{stats.pending}</p>
+          <p className="text-2xl font-bold text-slate-900">{statsError ? '—' : stats.pending}</p>
           <p className="text-xs text-slate-500">Pending Requests</p>
         </div>
         
@@ -239,7 +246,7 @@ export const PartsRequestsPage: React.FC = () => {
             <CheckCircle className="w-5 h-5 text-amber-600" />
             <span className="text-xs text-slate-500">Approved</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900">{stats.approvedToday}</p>
+          <p className="text-2xl font-bold text-slate-900">{statsError ? '—' : stats.approvedToday}</p>
           <p className="text-xs text-slate-500">Approved Today</p>
         </div>
         
@@ -248,7 +255,7 @@ export const PartsRequestsPage: React.FC = () => {
             <Package className="w-5 h-5 text-emerald-600" />
             <span className="text-xs text-slate-500">Issued</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900">{stats.issuedToday}</p>
+          <p className="text-2xl font-bold text-slate-900">{statsError ? '—' : stats.issuedToday}</p>
           <p className="text-xs text-slate-500">Issued Today</p>
         </div>
         
@@ -257,7 +264,7 @@ export const PartsRequestsPage: React.FC = () => {
             <Package className="w-5 h-5 text-blue-600" />
             <span className="text-xs text-slate-500">Items</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900">{stats.itemsRequested}</p>
+          <p className="text-2xl font-bold text-slate-900">{statsError ? '—' : stats.itemsRequested}</p>
           <p className="text-xs text-slate-500">Items Requested</p>
         </div>
       </div>
@@ -269,7 +276,7 @@ export const PartsRequestsPage: React.FC = () => {
             <AlertTriangle className="w-5 h-5 text-rose-600" />
             <span className="text-xs text-slate-500">Low Stock</span>
           </div>
-          <p className="text-2xl font-bold text-slate-900">{stats.lowStock}</p>
+          <p className="text-2xl font-bold text-slate-900">{statsError ? '—' : stats.lowStock}</p>
           <p className="text-xs text-slate-500">Low Stock</p>
         </div>
         

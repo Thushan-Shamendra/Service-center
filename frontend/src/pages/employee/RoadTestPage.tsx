@@ -75,7 +75,8 @@ export const RoadTestPage: React.FC = () => {
       ]);
 
       if (jobsRes.success) {
-        setJobCards(jobsRes.data);
+        const activeJobs = (jobsRes.data || []).filter((jc: any) => jc.status !== 'delivered' && jc.status !== 'cancelled');
+        setJobCards(activeJobs);
       }
 
       if (jobCardId) {

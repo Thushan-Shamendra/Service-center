@@ -12,6 +12,7 @@ import {
   CheckCircle,
   Clock,
   XCircle,
+  Trash2,
 } from 'lucide-react';
 
 export const SparePartsRequestPage: React.FC = () => {
@@ -30,6 +31,9 @@ export const SparePartsRequestPage: React.FC = () => {
     parts: [] as any[],
   });
 
+  const [showAddOtherPart, setShowAddOtherPart] = useState(false);
+  const [selectedOtherItemId, setSelectedOtherItemId] = useState('');
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -38,13 +42,16 @@ export const SparePartsRequestPage: React.FC = () => {
     try {
       const [requestsRes, inventoryRes, jobsRes] = await Promise.all([
         sparePartsApi.getSparePartsRequests(),
-        inventoryApi.getInventoryItems(),
+        inventoryApi.getInventoryItems({ limit: 1000 }),
         jobCardApi.getJobCards(),
       ]);
 
       if (requestsRes.success) setRequests(requestsRes.data);
       if (inventoryRes.success) setInventoryItems(inventoryRes.data);
-      if (jobsRes.success) setAssignedJobs(jobsRes.data);
+      if (jobsRes.success) {
+        const activeJobs = (jobsRes.data || []).filter((jc: any) => jc.status !== 'delivered' && jc.status !== 'cancelled');
+        setAssignedJobs(activeJobs);
+      }
     } catch (error) {
       toast.error('Failed to fetch data');
     } finally {
@@ -55,6 +62,8 @@ export const SparePartsRequestPage: React.FC = () => {
   const handleJobCardChange = async (jobCardId: string) => {
     setNewRequest({ ...newRequest, jobCard: jobCardId, parts: [] });
     setJobCardParts([]);
+    setShowAddOtherPart(false);
+    setSelectedOtherItemId('');
     
     if (!jobCardId) {
       setSelectedJobCard(null);
@@ -68,55 +77,46 @@ export const SparePartsRequestPage: React.FC = () => {
         
         // Get parts from job card
         const parts = jobRes.data.parts || [];
-        console.log('Job card parts:', parts);
         
         // Initialize parts with requested quantities from inspection
-        // We need to fetch current stock for each inventory item
-        // IMPORTANT: Only include parts that reference an existing inventory item (Admin Dashboard managed)
         const initializedParts = await Promise.all(parts.map(async (part: any) => {
           let currentStock = 0;
-          let unit = '';
+          let unit = 'Piece';
+          let itemName = part.name || '';
           
-          // If we have an InventoryItem reference, fetch current stock
-          if (part.item) {
-            try {
-              const itemId = typeof part.item === 'object' ? part.item._id : part.item;
-              // Use the dedicated getInventoryItemById endpoint for better performance
-              const itemRes = await inventoryApi.getInventoryItemById(itemId);
-              if (itemRes.success && itemRes.data) {
-                currentStock = itemRes.data.quantity || 0;
-                unit = itemRes.data.unit || '';
-              }
-            } catch (error) {
-              console.error('Failed to fetch current stock for item:', part.item);
-              // Fallback: try to get from the populated data if available
-              if (part.item && typeof part.item === 'object') {
-                currentStock = part.item.currentStock || 0;
-                unit = part.item.unit || '';
-              }
-            }
+          if (part.item && typeof part.item === 'object') {
+            currentStock = part.item.quantity ?? 0;
+            unit = part.item.unit || unit;
+            itemName = part.item.itemName || itemName;
           }
           
           const itemId = part.item?._id || (typeof part.item === 'string' ? part.item : null);
           
-          // Skip parts that don't have a valid inventory item reference
           if (!itemId) {
-            console.warn('Skipping part without inventory reference:', part.name);
             return null;
+          }
+
+          // If stock wasn't on part.item, look it up in inventoryItems
+          if (currentStock === 0) {
+            const inv = inventoryItems.find((i: any) => i._id === itemId);
+            if (inv) {
+              currentStock = inv.quantity;
+              unit = inv.unit || unit;
+              if (!itemName) itemName = inv.itemName;
+            }
           }
           
           return {
             itemId,
-            itemName: part.name,
+            itemName: itemName || 'Inspection Part',
             requestedQuantity: part.quantity || 1,
             availableStock: currentStock,
             unit: unit,
+            source: 'inspection',
           };
         }));
         
-        // Filter out null entries (parts without inventory references)
         const validParts = initializedParts.filter((part: any) => part !== null);
-        
         setJobCardParts(validParts);
         setNewRequest(prev => ({ ...prev, parts: validParts }));
       }
@@ -130,6 +130,44 @@ export const SparePartsRequestPage: React.FC = () => {
     updatedParts[index].requestedQuantity = newQuantity;
     setJobCardParts(updatedParts);
     setNewRequest(prev => ({ ...prev, parts: updatedParts }));
+  };
+
+  const handleAddOtherPartToModal = (itemId: string) => {
+    if (!itemId) return;
+    const invItem = inventoryItems.find((i: any) => i._id === itemId);
+    if (!invItem) return;
+
+    const existingIdx = jobCardParts.findIndex((p: any) => p.itemId === itemId);
+    if (existingIdx >= 0) {
+      toast('Part is already in your request list. Quantity incremented.', { icon: 'ℹ️' });
+      handlePartQuantityChange(existingIdx, jobCardParts[existingIdx].requestedQuantity + 1);
+      setShowAddOtherPart(false);
+      setSelectedOtherItemId('');
+      return;
+    }
+
+    const newPart = {
+      itemId: invItem._id,
+      itemName: invItem.itemName,
+      requestedQuantity: 1,
+      availableStock: invItem.quantity || 0,
+      unit: invItem.unit || 'Piece',
+      source: 'additional',
+    };
+
+    const updated = [...jobCardParts, newPart];
+    setJobCardParts(updated);
+    setNewRequest(prev => ({ ...prev, parts: updated }));
+    setSelectedOtherItemId('');
+    setShowAddOtherPart(false);
+    toast.success(`Added ${invItem.itemName}`);
+  };
+
+  const handleRemovePartFromModal = (index: number) => {
+    const updated = jobCardParts.filter((_, i) => i !== index);
+    setJobCardParts(updated);
+    setNewRequest(prev => ({ ...prev, parts: updated }));
+    toast.success('Part removed');
   };
 
   const handleSubmitRequest = async () => {
@@ -374,27 +412,88 @@ export const SparePartsRequestPage: React.FC = () => {
               </div>
 
               {/* Parts List */}
-              {jobCardParts.length > 0 ? (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Parts from Inspection</label>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Requested Parts</label>
+                  {newRequest.jobCard && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAddOtherPart(!showAddOtherPart)}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      {showAddOtherPart ? 'Hide Part Selector' : '+ Add Other Part'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Other Part Selector */}
+                {showAddOtherPart && (
+                  <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                    <label className="block text-xs font-semibold text-blue-900">
+                      Select Inventory Item to Add:
+                    </label>
+                    <div className="flex gap-2">
+                      <select
+                        value={selectedOtherItemId}
+                        onChange={(e) => setSelectedOtherItemId(e.target.value)}
+                        className="flex-1 px-2.5 py-1.5 bg-white border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
+                      >
+                        <option value="">-- Choose item in stock --</option>
+                        {inventoryItems
+                          .filter((i: any) => (i.quantity || 0) > 0)
+                          .map((item: any) => (
+                            <option key={item._id} value={item._id}>
+                              {item.itemName} ({item.itemCode}) — In Stock: {item.quantity} {item.unit}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => handleAddOtherPartToModal(selectedOtherItemId)}
+                        disabled={!selectedOtherItemId}
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {jobCardParts.length > 0 ? (
                   <div className="space-y-3 max-h-64 overflow-y-auto">
                     {jobCardParts.map((part, index) => (
-                      <div key={index} className="bg-gray-50 rounded-lg p-3">
+                      <div key={index} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
                         <div className="flex justify-between items-start mb-2">
-                          <div className="flex-1">
-                            <p className="font-medium text-sm">{part.itemName}</p>
-                            <p className="text-xs text-gray-600">Available Stock: {part.availableStock} {part.unit}</p>
+                          <div className="flex-1 min-w-0 pr-2">
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-sm text-gray-900 truncate">{part.itemName}</p>
+                              {part.source === 'inspection' ? (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold">Inspection</span>
+                              ) : (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold">Additional</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-600 mt-0.5">Available Stock: {part.availableStock} {part.unit}</p>
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePartFromModal(index)}
+                            className="text-gray-400 hover:text-red-600 p-1 rounded transition-colors"
+                            title="Remove part"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                         <div className="flex items-center gap-2">
                           <label className="text-xs text-gray-600">Quantity to Request:</label>
                           <input
                             type="number"
-                            min="0"
+                            min="1"
                             max={part.availableStock}
                             value={part.requestedQuantity}
-                            onChange={(e) => handlePartQuantityChange(index, parseInt(e.target.value) || 0)}
-                            className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
+                            onChange={(e) => handlePartQuantityChange(index, parseInt(e.target.value) || 1)}
+                            className="w-20 px-2 py-1 border border-gray-300 rounded text-sm bg-white"
                           />
                           <span className="text-xs text-gray-600">{part.unit}</span>
                         </div>
@@ -407,12 +506,20 @@ export const SparePartsRequestPage: React.FC = () => {
                       </div>
                     ))}
                   </div>
-                </div>
-              ) : newRequest.jobCard ? (
-                <div className="text-center py-4 text-gray-500 text-sm">
-                  No parts found for this job card
-                </div>
-              ) : null}
+                ) : newRequest.jobCard ? (
+                  <div className="text-center py-6 border-2 border-dashed border-gray-200 rounded-lg">
+                    <p className="text-sm text-gray-500 mb-2">No parts specified yet</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddOtherPart(true)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 rounded text-xs font-semibold hover:bg-blue-100"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Part from Inventory
+                    </button>
+                  </div>
+                ) : null}
+              </div>
 
               {/* Reason */}
               <div>

@@ -60,7 +60,7 @@ export const EmployeeProfilePage: React.FC = () => {
       const res = await userApi.updateProfile(editData);
       if (res.success) {
         toast.success('Profile updated successfully');
-        setUser(res.data);
+        await fetchUserProfile();
         setIsEditing(false);
       }
     } catch (error) {
@@ -121,6 +121,16 @@ export const EmployeeProfilePage: React.FC = () => {
     }
   };
 
+  const employeeId = user?.employeeDetails?.employeeId || '';
+  const fullName = user?.fullName || [user?.firstName, user?.lastName].filter(Boolean).join(' ');
+  const designation = user?.employeeDetails?.designation || '';
+  const formatAddress = (address: any): string => {
+    if (typeof address === 'string') return address;
+    return [address?.street, address?.city, address?.province, address?.postalCode]
+      .filter(Boolean).join(', ');
+  };
+  const address = formatAddress(user?.address) || formatAddress(user?.employeeDetails?.address);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -165,7 +175,7 @@ export const EmployeeProfilePage: React.FC = () => {
                 {user?.profilePhoto ? (
                   <img
                     src={user.profilePhoto}
-                    alt={user?.name || 'Profile'}
+                    alt={fullName || 'Profile'}
                     className="w-32 h-32 rounded-full mx-auto object-cover border-2 border-brand-500"
                   />
                 ) : (
@@ -178,9 +188,9 @@ export const EmployeeProfilePage: React.FC = () => {
                   <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
                 </label>
               </div>
-              <h2 className="text-xl font-bold mt-4">{user?.name}</h2>
-              <p className="text-sm text-gray-600">{user?.employeeId}</p>
-              <p className="text-sm text-gray-500 mt-1">{user?.designation}</p>
+              <h2 className="text-xl font-bold mt-4">{fullName}</h2>
+              <p className="text-sm text-gray-600">{employeeId}</p>
+              <p className="text-sm text-gray-500 mt-1">{designation}</p>
             </div>
           </div>
 
@@ -216,7 +226,7 @@ export const EmployeeProfilePage: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <input
                     type="text"
-                    value={user?.employeeId || ''}
+                    value={employeeId}
                     disabled
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
                   />
@@ -228,7 +238,7 @@ export const EmployeeProfilePage: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <input
                     type="text"
-                    value={user?.name || ''}
+                    value={fullName}
                     disabled
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
                   />
@@ -252,7 +262,7 @@ export const EmployeeProfilePage: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <input
                     type="text"
-                    value={user?.designation || 'Technician'}
+                    value={designation}
                     disabled
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
                   />
@@ -302,7 +312,7 @@ export const EmployeeProfilePage: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <input
                     type="text"
-                    value={user?.address || ''}
+                    value={address}
                     disabled
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
                   />

@@ -159,10 +159,21 @@ const PORT = process.env.PORT || 5000;
 // Only start the HTTP server when running directly (local dev / traditional Node.js).
 // On Vercel serverless, the exported `app` is used directly as the handler.
 if (process.env.VERCEL !== '1') {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`\n🚗 VSMS API Server running on port ${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV}`);
     console.log(`   API URL: http://localhost:${PORT}/api\n`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n⚠️  Port ${PORT} is already in use by another running server!`);
+      console.error(`   To free it, stop the other terminal with Ctrl+C or run: npm run kill-port\n`);
+      process.exit(1);
+    } else {
+      console.error('Server error:', err);
+      process.exit(1);
+    }
   });
 }
 

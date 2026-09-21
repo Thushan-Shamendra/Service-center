@@ -266,8 +266,12 @@ export const SuppliersPage: React.FC = () => {
     }
   }, [page, searchQuery, statusFilter, supplierFilter, startDate, endDate, activeTab]);
 
-  // Check for query parameter to auto-open add modal
+  // Check for query parameter to auto-open add modal or select tab
   useEffect(() => {
+    const tabParam = searchParams.get('tab') as TabType;
+    if (tabParam && ['suppliers', 'purchase-orders', 'grn', 'purchase-returns', 'payments'].includes(tabParam)) {
+      setActiveTab(tabParam);
+    }
     const actionParam = searchParams.get('action');
     if (actionParam === 'new') {
       setIsAddModalOpen(true);

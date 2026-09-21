@@ -16,6 +16,11 @@ export const paymentApi = {
     return response.data;
   },
 
+  verifyPayment: async (id: string, data: { action: 'approve' | 'reject'; rejectionReason?: string; notes?: string }) => {
+    const response = await api.put(`/payments/${id}/verify`, data);
+    return response.data;
+  },
+
   refundPayment: async (id: string, refundData: { refundAmount?: number; refundReason?: string }) => {
     const response = await api.put(`/payments/${id}/refund`, refundData);
     return response.data;

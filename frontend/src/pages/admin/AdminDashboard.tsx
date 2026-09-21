@@ -93,59 +93,73 @@ export const AdminDashboard: React.FC = () => {
 
       {/* Summary Cards Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard
-          title="Total Managers"
-          value={data?.totalManagers || 0}
-          icon={Users}
-          subtext="Active management personnel"
-          color="purple"
-        />
-        <StatCard
-          title="Total Employees"
-          value={data?.totalEmployees || 0}
-          icon={UserCheck}
-          subtext="Staff & technicians"
-          color="blue"
-        />
-        <StatCard
-          title="Total Customers"
-          value={data?.totalCustomers || 0}
-          icon={UserCheck}
-          subtext="Registered vehicle owners"
-          color="emerald"
-        />
-        <StatCard
-          title="Total Suppliers"
-          value={data?.totalSuppliers || 0}
-          icon={Truck}
-          subtext="Active parts vendors"
-          color="amber"
-        />
-        <StatCard
-          title="Pending POs"
-          value={data?.pendingPurchaseOrders || 0}
-          icon={FileText}
-          subtext="Awaiting processing"
-          color="amber"
-        />
-        <StatCard
-          title="Pending GRNs"
-          value={data?.pendingGRNs || 0}
-          icon={Package}
-          subtext="Partial receipts"
-          color="blue"
-        />
+        <Link to="/admin/users?role=manager" className="block transition-transform hover:-translate-y-0.5">
+          <StatCard
+            title="Total Managers"
+            value={data?.totalManagers || 0}
+            icon={Users}
+            subtext="Active management personnel"
+            color="purple"
+          />
+        </Link>
+        <Link to="/admin/users?role=employee" className="block transition-transform hover:-translate-y-0.5">
+          <StatCard
+            title="Total Employees"
+            value={data?.totalEmployees || 0}
+            icon={UserCheck}
+            subtext="Staff & technicians"
+            color="blue"
+          />
+        </Link>
+        <Link to="/admin/users?role=customer" className="block transition-transform hover:-translate-y-0.5">
+          <StatCard
+            title="Total Customers"
+            value={data?.totalCustomers || 0}
+            icon={UserCheck}
+            subtext="Registered vehicle owners"
+            color="emerald"
+          />
+        </Link>
+        <Link to="/admin/suppliers" className="block transition-transform hover:-translate-y-0.5" title="View Suppliers">
+          <StatCard
+            title="Total Suppliers"
+            value={data?.totalSuppliers || 0}
+            icon={Truck}
+            subtext="Active parts vendors"
+            color="amber"
+          />
+        </Link>
+        <Link to="/admin/suppliers?tab=purchase-orders" className="block transition-transform hover:-translate-y-0.5" title="View Purchase Orders">
+          <StatCard
+            title="Pending POs"
+            value={data?.pendingPurchaseOrders || 0}
+            icon={FileText}
+            subtext="Awaiting processing"
+            color="amber"
+          />
+        </Link>
+        <Link to="/admin/suppliers?tab=grn" className="block transition-transform hover:-translate-y-0.5" title="View GRN">
+          <StatCard
+            title="Pending GRNs"
+            value={data?.pendingGRNs || 0}
+            icon={Package}
+            subtext="Partial receipts"
+            color="blue"
+          />
+        </Link>
       </div>
 
       {/* Second Row of Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        <StatCard
-          title="Pending Payables"
-          value={data?.pendingPayables || 0}
-          icon={CreditCard}
-          subtext="Outstanding payments"
-          color="rose"
-        />
+        <Link to="/admin/suppliers?tab=payments" className="block transition-transform hover:-translate-y-0.5" title="View Payments">
+          <StatCard
+            title="Pending Payables"
+            value={data?.pendingPayables || 0}
+            icon={CreditCard}
+            subtext="Outstanding payments"
+            color="rose"
+          />
+        </Link>
         <StatCard
           title="Monthly Revenue"
           value={formatLKR(data?.monthlyRevenue || 0)}
@@ -160,13 +174,15 @@ export const AdminDashboard: React.FC = () => {
           subtext="Operational expenses"
           color="amber"
         />
-        <StatCard
-          title="Low Stock Items"
-          value={data?.lowStockItems || 0}
-          icon={AlertTriangle}
-          subtext="Below reorder level"
-          color="amber"
-        />
+        <Link to="/admin/inventory" className="block transition-transform hover:-translate-y-0.5" title="View Inventory">
+          <StatCard
+            title="Low Stock Items"
+            value={data?.lowStockItems || 0}
+            icon={AlertTriangle}
+            subtext="Below reorder level"
+            color="amber"
+          />
+        </Link>
       </div>
 
       {/* Stock Alert Notifications */}

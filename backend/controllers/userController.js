@@ -72,7 +72,7 @@ export const getProfile = async (req, res) => {
 // Update user profile
 export const updateProfile = async (req, res) => {
   try {
-    const { firstName, lastName, mobile, email, address, nic } = req.body;
+    const { firstName, lastName, mobile, email, address, nic, gender } = req.body;
     
     const user = await User.findById(req.user.id);
     if (!user) {
@@ -88,6 +88,7 @@ export const updateProfile = async (req, res) => {
     if (mobile) user.mobile = mobile;
     if (email) user.email = email;
     if (address) user.address = address;
+    if (gender !== undefined) user.gender = gender;
 
     if (req.file) {
       user.profilePhoto = `/uploads/profiles/${req.file.filename}`;
@@ -98,11 +99,12 @@ export const updateProfile = async (req, res) => {
     await user.save();
 
     // Update employee details if applicable
-    if (user.role === 'employee') {
+    if (user.role === 'employee' || user.role === 'manager') {
       const employee = await Employee.findOne({ user: user._id });
       if (employee) {
         if (address) employee.address = address;
-        if (nic) employee.nic = nic;
+        if (nic !== undefined) employee.nic = nic;
+        if (gender !== undefined) employee.gender = gender;
         await employee.save();
       }
     }

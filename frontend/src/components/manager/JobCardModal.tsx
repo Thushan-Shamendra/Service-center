@@ -3,7 +3,7 @@ import { jobCardApi } from '../../api/jobCardApi';
 import { appointmentApi } from '../../api/appointmentApi';
 import { userApi } from '../../api/userApi';
 import { User, Appointment } from '../../types';
-import { Lock, Check, FileText } from 'lucide-react';
+import { Lock, Check, FileText, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import dayjs from 'dayjs';
 
@@ -91,6 +91,22 @@ export const JobCardModal: React.FC<JobCardModalProps> = ({ isOpen, onClose, onS
       // Fetch rescheduled appointments
       const rescheduledRes = await appointmentApi.getAppointments({ limit: 100, status: 'rescheduled' });
       
+      // Fetch existing job cards to exclude appointments that already have a job card
+      let assignedAppointmentIds = new Set<string>();
+      try {
+        const jobCardsRes = await jobCardApi.getJobCards({ limit: 500 });
+        if (jobCardsRes.success && Array.isArray(jobCardsRes.data)) {
+          jobCardsRes.data.forEach((jc: any) => {
+            const aptId = typeof jc.appointment === 'object' && jc.appointment !== null
+              ? (jc.appointment._id || jc.appointment.id)
+              : jc.appointment;
+            if (aptId) assignedAppointmentIds.add(String(aptId));
+          });
+        }
+      } catch (jcErr) {
+        console.error('Error fetching job cards for deduplication:', jcErr);
+      }
+
       let allAppointments: Appointment[] = [];
       
       if (approvedRes.success) {
@@ -101,7 +117,28 @@ export const JobCardModal: React.FC<JobCardModalProps> = ({ isOpen, onClose, onS
         allAppointments = [...allAppointments, ...(rescheduledRes.data || [])];
       }
       
-      setAppointments(allAppointments);
+      // Filter out older appointments (past dates before today) and already assigned appointments
+      const today = dayjs().startOf('day');
+      const filtered = allAppointments
+        .filter((apt: Appointment) => {
+          const aptId = apt._id || apt.id;
+          if (aptId && assignedAppointmentIds.has(String(aptId))) return false;
+
+          if (apt.preferredDate) {
+            const isOlderThanToday = dayjs(apt.preferredDate).isBefore(today, 'day');
+            if (isOlderThanToday) return false;
+          }
+
+          return true;
+        })
+        .sort((a, b) => {
+          const dateA = dayjs(a.preferredDate).valueOf();
+          const dateB = dayjs(b.preferredDate).valueOf();
+          if (dateA !== dateB) return dateA - dateB;
+          return (a.preferredTime || '').localeCompare(b.preferredTime || '');
+        });
+
+      setAppointments(filtered);
     } catch (err) {
       console.error('Error fetching appointments:', err);
     }
@@ -456,7 +493,7 @@ export const JobCardModal: React.FC<JobCardModalProps> = ({ isOpen, onClose, onS
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-slate-900">Select Appointment</h3>
               <button onClick={() => setShowAppointmentModal(false)} className="text-slate-400 hover:text-slate-600">
-                <FileText className="w-5 h-5" />
+                <X className="w-5 h-5" />
               </button>
             </div>
             

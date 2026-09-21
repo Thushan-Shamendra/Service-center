@@ -23,7 +23,7 @@ export const getSparePartsRequests = async (req, res) => {
     const [requests, total] = await Promise.all([
       SparePartsRequest.find(query)
         .populate('jobCard', 'jobCardNumber complaint')
-        .populate('technician', 'firstName lastName')
+        .populate({ path: 'technician', populate: { path: 'user', select: 'firstName lastName' } })
         .populate('item', 'itemName quantity')
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -48,9 +48,47 @@ export const getSparePartsRequests = async (req, res) => {
 
 export const createSparePartsRequest = async (req, res) => {
   try {
-    const { jobCard, item, requestedQuantity, reason, priority } = req.body;
+    const { jobCard, item, items, requestedQuantity, reason, priority } = req.body;
 
-    // Validate the requested item exists in the Admin Dashboard inventory
+    const employee = await Employee.findOne({ user: req.user._id });
+    if (!employee) {
+      return res.status(400).json({ success: false, message: 'Employee profile not found' });
+    }
+
+    // Support batch items array
+    if (Array.isArray(items) && items.length > 0) {
+      const createdRequests = [];
+      for (const singleItem of items) {
+        const itemId = singleItem.item || singleItem._id || singleItem.itemId;
+        const qty = Number(singleItem.requestedQuantity || singleItem.quantity || 1);
+        const itemReason = singleItem.reason || reason || 'Required for vehicle service';
+        const itemPriority = singleItem.priority || priority || 'medium';
+
+        const inv = await InventoryItem.findById(itemId);
+        if (!inv) continue;
+
+        const reqDoc = await SparePartsRequest.create({
+          jobCard,
+          technician: employee._id,
+          item: inv._id,
+          itemName: inv.itemName,
+          requestedQuantity: Math.min(qty, inv.quantity),
+          currentStock: inv.quantity,
+          reason: itemReason,
+          priority: itemPriority,
+          status: 'pending',
+        });
+        createdRequests.push(reqDoc);
+      }
+
+      return res.status(201).json({
+        success: true,
+        data: createdRequests,
+        message: `${createdRequests.length} spare parts request(s) created successfully`,
+      });
+    }
+
+    // Single item handling
     const inventoryItem = await InventoryItem.findById(item);
     if (!inventoryItem) {
       return res.status(404).json({ 
@@ -59,22 +97,15 @@ export const createSparePartsRequest = async (req, res) => {
       });
     }
 
-    // Validate quantity
     if (!requestedQuantity || requestedQuantity <= 0) {
       return res.status(400).json({ success: false, message: 'Valid quantity is required' });
     }
 
-    // Compare requested quantity with available inventory stock
     if (requestedQuantity > inventoryItem.quantity) {
       return res.status(400).json({ 
         success: false, 
         message: `Requested quantity (${requestedQuantity}) exceeds available inventory stock (${inventoryItem.quantity} ${inventoryItem.unit}). Please reduce the quantity or contact the Admin to restock.` 
       });
-    }
-
-    const employee = await Employee.findOne({ user: req.user._id });
-    if (!employee) {
-      return res.status(400).json({ success: false, message: 'Employee profile not found' });
     }
 
     const request = await SparePartsRequest.create({
@@ -100,12 +131,14 @@ export const getPartsRequestStats = async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const [pending, approvedToday, issuedToday, totalRequests, lowStockItems] = await Promise.all([
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const [pending, approvedToday, issuedToday, requestedItems, lowStockItems] = await Promise.all([
       SparePartsRequest.countDocuments({ status: 'pending' }),
-      SparePartsRequest.countDocuments({ status: 'approved', createdAt: { $gte: today } }),
-      SparePartsRequest.countDocuments({ status: 'issued', createdAt: { $gte: today } }),
-      SparePartsRequest.countDocuments({}),
-      InventoryItem.countDocuments({ quantity: { $lte: '$reorderLevel' } }),
+      SparePartsRequest.countDocuments({ approvedAt: { $gte: today, $lt: tomorrow } }),
+      SparePartsRequest.countDocuments({ issueDate: { $gte: today, $lt: tomorrow } }),
+      SparePartsRequest.aggregate([{ $group: { _id: null, total: { $sum: '$requestedQuantity' } } }]),
+      InventoryItem.countDocuments({ status: 'active', $expr: { $lte: ['$quantity', '$reorderLevel'] } }),
     ]);
 
     res.status(200).json({
@@ -114,7 +147,7 @@ export const getPartsRequestStats = async (req, res) => {
         pending,
         approvedToday,
         issuedToday,
-        itemsRequested: totalRequests,
+        itemsRequested: requestedItems[0]?.total || 0,
         lowStock: lowStockItems,
       },
     });
@@ -171,6 +204,7 @@ export const approveSparePartsRequest = async (req, res) => {
       request.approvedQuantity = quantityToApprove;
       request.managerRemarks = managerRemarks;
       request.status = 'approved';
+      request.approvedAt = new Date();
       await request.save({ session });
 
       await session.commitTransaction();
@@ -363,6 +397,7 @@ export const approveMultiple = async (req, res) => {
           request.approvedQuantity = request.requestedQuantity;
           request.managerRemarks = remarks || 'Bulk approved by manager';
           request.status = 'approved';
+          request.approvedAt = new Date();
           await request.save();
           results.push(request);
         }

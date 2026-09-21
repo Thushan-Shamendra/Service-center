@@ -24,7 +24,7 @@ const paymentSchema = new mongoose.Schema(
     paymentMethod: {
       type: String,
       required: true,
-      enum: ['cash', 'card', 'bank_transfer', 'cheque'],
+      enum: ['cash', 'card', 'bank_transfer', 'cheque', 'card_machine'],
     },
     referenceNumber: {
       type: String,
@@ -37,7 +37,29 @@ const paymentSchema = new mongoose.Schema(
     recordedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+    },
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    verifiedAt: {
+      type: Date,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+    },
+    slipUrl: {
+      type: String,
+      trim: true,
+    },
+    payerName: {
+      type: String,
+      trim: true,
+    },
+    payerPhone: {
+      type: String,
+      trim: true,
     },
     bankDetails: {
       bankName: String,
@@ -48,6 +70,11 @@ const paymentSchema = new mongoose.Schema(
     cardDetails: {
       lastFourDigits: String,
       cardType: String,
+      cardHolderName: String,
+    },
+    posTerminalDetails: {
+      terminalId: String,
+      authCode: String,
     },
     notes: {
       type: String,
@@ -55,8 +82,8 @@ const paymentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'completed', 'cancelled', 'refunded'],
-      default: 'completed',
+      enum: ['pending', 'completed', 'cancelled', 'rejected', 'refunded'],
+      default: 'pending',
     },
   },
   {

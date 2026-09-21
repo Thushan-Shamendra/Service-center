@@ -27,17 +27,18 @@ export const getAppointments = async (req, res) => {
     }
 
     // Handle date range filtering
-    if (req.query.startDate && req.query.endDate) {
-      const startDate = new Date(req.query.startDate);
-      startDate.setHours(0, 0, 0, 0);
-      
-      const endDate = new Date(req.query.endDate);
-      endDate.setHours(23, 59, 59, 999);
-      
-      query.preferredDate = {
-        $gte: startDate,
-        $lte: endDate,
-      };
+    if (req.query.startDate || req.query.endDate) {
+      query.preferredDate = query.preferredDate || {};
+      if (req.query.startDate) {
+        const startDate = new Date(req.query.startDate);
+        startDate.setHours(0, 0, 0, 0);
+        query.preferredDate.$gte = startDate;
+      }
+      if (req.query.endDate) {
+        const endDate = new Date(req.query.endDate);
+        endDate.setHours(23, 59, 59, 999);
+        query.preferredDate.$lte = endDate;
+      }
     }
 
     // Handle search

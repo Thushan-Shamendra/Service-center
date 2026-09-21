@@ -293,7 +293,7 @@ export const JobCardDetailsPage: React.FC = () => {
             </div>
             <div className="flex items-start gap-2">
               <span className="text-xs font-bold text-slate-400 uppercase w-28 shrink-0">Estimated Time:</span>
-              <span className="text-sm text-slate-700 font-medium">{job.estimatedTime || 'N/A'}</span>
+              <span className="text-sm text-slate-700 font-medium">{job.estimatedTime || (job.appointment?.estimatedDuration > 0 ? `${job.appointment.estimatedDuration} hours` : 'Not recorded')}</span>
             </div>
           </div>
         </div>
@@ -311,7 +311,7 @@ export const JobCardDetailsPage: React.FC = () => {
             <div className="space-y-2">
               <div className="flex items-start gap-2">
                 <span className="text-xs font-bold text-slate-400 uppercase w-36 shrink-0">Inspection Date:</span>
-                <span className="text-sm text-slate-700 font-medium">{job.inspectionDate ? formatDate(job.inspectionDate) : 'N/A'}</span>
+                <span className="text-sm text-slate-700 font-medium">{job.inspectionDate ? formatDate(job.inspectionDate) : 'Not recorded'}</span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="text-xs font-bold text-slate-400 uppercase w-36 shrink-0">Odometer Reading:</span>

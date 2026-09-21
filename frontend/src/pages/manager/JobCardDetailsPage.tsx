@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { jobCardApi } from '../../api/jobCardApi';
-import { userApi } from '../../api/userApi';
 import { vehicleApi } from '../../api/vehicleApi';
 import { JobCard, User, Vehicle } from '../../types';
 import { StatusBadge } from '../../components/ui/StatusBadge';
@@ -77,23 +76,12 @@ export const JobCardDetailsPage: React.FC = () => {
         if (jcData) {
           setJobCard(jcData);
           
-          // Fetch customer and vehicle
-          const customerId = typeof jcData.customer === 'object' 
-            ? (jcData.customer as any)._id 
-            : jcData.customer;
+          // Contact details belong to the populated user, not the customer profile ID.
+          const customerUser = jcData.customer?.user;
+          setCustomer(customerUser && typeof customerUser === 'object' ? customerUser : null);
           const vehicleId = typeof jcData.vehicle === 'object' 
             ? (jcData.vehicle as any)._id 
             : jcData.vehicle;
-          
-          if (customerId) {
-            const cRes = await userApi.getUsers({ role: 'customer', limit: 1000 });
-            if (cRes.success) {
-              const customerData = cRes.data.find((u: User) => 
-                u._id === customerId || u.id === customerId
-              );
-              setCustomer(customerData || null);
-            }
-          }
           
           if (vehicleId) {
             const vRes = await vehicleApi.getVehicles({ limit: 1000 });
