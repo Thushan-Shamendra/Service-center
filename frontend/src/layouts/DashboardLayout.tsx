@@ -13,12 +13,16 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
   return (
     <div className="min-h-screen bg-surface-bg flex">
       {/* Sidebar Navigation */}
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <div className="print:hidden">
+        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      </div>
 
       {/* Main Area */}
-      <div className="flex-1 flex flex-col min-w-0 lg:pl-64">
-        <Topbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="flex-1 p-4 sm:p-6 md:p-8 max-w-7xl w-full mx-auto animate-fade-in">
+      <div className="flex-1 flex flex-col min-w-0 lg:pl-64 print:pl-0">
+        <div className="print:hidden">
+          <Topbar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
+        </div>
+        <main className="flex-1 p-4 sm:p-6 md:p-8 max-w-7xl w-full mx-auto animate-fade-in print:p-0 print:max-w-none">
           {children || <Outlet />}
         </main>
       </div>

@@ -4,7 +4,8 @@ import { paymentApi } from '../../api/paymentApi';
 import { Invoice } from '../../types';
 import { StatusBadge } from '../ui/StatusBadge';
 import { formatLKR, formatDate } from '../../utils/formatters';
-import { X, Printer, FileText, User, Car, Calendar, CreditCard, AlertCircle, PlusCircle, CheckCircle2 } from 'lucide-react';
+import { printInvoice, downloadInvoicePDF } from '../../utils/printInvoice';
+import { X, Printer, Download, FileText, User, Car, Calendar, CreditCard, AlertCircle, PlusCircle, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface InvoiceDetailsModalProps {
@@ -124,7 +125,22 @@ export const InvoiceDetailsModal: React.FC<InvoiceDetailsModalProps> = ({ invoic
   };
 
   const handlePrint = () => {
-    window.print();
+    if (invoice) {
+      printInvoice(invoice, payments, 'print');
+      toast.success(`Opening print preview for ${invoice.invoiceNumber}`);
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    if (invoice) {
+      const toastId = toast.loading(`Generating PDF for ${invoice.invoiceNumber}...`);
+      try {
+        await downloadInvoicePDF(invoice, payments);
+        toast.success(`Invoice ${invoice.invoiceNumber} downloaded to device!`, { id: toastId });
+      } catch (err) {
+        toast.error('Failed to generate PDF. Opening print preview instead.', { id: toastId });
+      }
+    }
   };
 
   if (isLoading) {
@@ -548,10 +564,17 @@ export const InvoiceDetailsModal: React.FC<InvoiceDetailsModalProps> = ({ invoic
           <div className="flex items-center gap-2">
             <button
               onClick={handlePrint}
-              className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl hover:bg-brand-700 transition-colors font-medium text-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors font-medium text-sm"
             >
-              <Printer className="w-4 h-4" />
+              <Printer className="w-4 h-4 text-slate-600" />
               Print Invoice
+            </button>
+            <button
+              onClick={handleDownloadPDF}
+              className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl hover:bg-brand-700 transition-colors font-medium text-sm shadow-xs"
+            >
+              <Download className="w-4 h-4" />
+              Download PDF
             </button>
           </div>
         </div>

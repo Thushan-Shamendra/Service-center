@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { invoiceApi } from '../../api/invoiceApi';
 import { paymentApi } from '../../api/paymentApi';
 import { formatLKR, formatDate, formatDateTime } from '../../utils/formatters';
+import { printInvoice, downloadInvoicePDF } from '../../utils/printInvoice';
 import { 
   FileText, 
   Car, 
@@ -82,6 +83,7 @@ export const CustomerInvoicesPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isDownloadingPDF, setIsDownloadingPDF] = useState(false);
 
   // Payment modal state
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -151,9 +153,41 @@ export const CustomerInvoicesPage: React.FC = () => {
     );
   };
 
-  const handleDownloadPDF = () => {
-    window.print();
-    toast.success('PDF download initiated');
+  const getInvoicePayments = (inv: Invoice) => {
+    return payments.filter((p: any) => {
+      const pInvId = p.invoice?._id || p.invoice;
+      return pInvId === inv._id || p.invoice?.invoiceNumber === inv.invoiceNumber;
+    });
+  };
+
+  const handlePrintInvoice = (targetInvoice?: Invoice) => {
+    const inv = targetInvoice || selectedInvoice;
+    if (!inv) {
+      toast.error('Please select an invoice to print');
+      return;
+    }
+    const invPayments = getInvoicePayments(inv);
+    printInvoice(inv, invPayments, 'print');
+    toast.success(`Opening print preview for ${inv.invoiceNumber}`);
+  };
+
+  const handleDownloadPDF = async (targetInvoice?: Invoice) => {
+    const inv = targetInvoice || selectedInvoice;
+    if (!inv) {
+      toast.error('Please select an invoice to download');
+      return;
+    }
+    const invPayments = getInvoicePayments(inv);
+    setIsDownloadingPDF(true);
+    const toastId = toast.loading(`Generating PDF for ${inv.invoiceNumber}...`);
+    try {
+      await downloadInvoicePDF(inv, invPayments);
+      toast.success(`Invoice ${inv.invoiceNumber} downloaded to device!`, { id: toastId });
+    } catch (err) {
+      toast.error('Failed to generate PDF file. Opening print preview instead.', { id: toastId });
+    } finally {
+      setIsDownloadingPDF(false);
+    }
   };
 
   const handlePayNow = (targetInvoice?: Invoice) => {
@@ -190,13 +224,13 @@ export const CustomerInvoicesPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      <div className="print:hidden">
         <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Invoices & Payments</h1>
         <p className="text-sm text-slate-500">View your invoices, submit payments online or at counter, and check verification status</p>
       </div>
 
       {/* Search */}
-      <div className="relative">
+      <div className="relative print:hidden">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
         <input
           type="text"
@@ -210,7 +244,7 @@ export const CustomerInvoicesPage: React.FC = () => {
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Invoice List & Outstanding Summary */}
-        <div className="lg:col-span-1 space-y-4">
+        <div className="lg:col-span-1 space-y-4 print:hidden">
           <div className="bg-white rounded-3xl border border-slate-100 shadow-card p-4">
             <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-3">Your Invoices</h2>
             {filteredInvoices.length === 0 ? (
@@ -236,8 +270,36 @@ export const CustomerInvoicesPage: React.FC = () => {
                       }`}
                     >
                       <div className="flex items-start justify-between mb-2">
-                        <div className="font-bold text-brand-600 text-sm">{invoice.invoiceNumber}</div>
-                        <div className="text-xs text-slate-500">{formatDate(invoice.createdAt)}</div>
+                        <div>
+                          <div className="font-bold text-brand-600 text-sm">{invoice.invoiceNumber}</div>
+                          <div className="text-xs text-slate-500">{formatDate(invoice.createdAt)}</div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedInvoice(invoice);
+                              handlePrintInvoice(invoice);
+                            }}
+                            title="Print this invoice"
+                            className="p-1.5 hover:bg-slate-200/80 rounded-lg text-slate-400 hover:text-slate-700 transition-colors"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedInvoice(invoice);
+                              handleDownloadPDF(invoice);
+                            }}
+                            title="Download PDF"
+                            className="p-1.5 hover:bg-slate-200/80 rounded-lg text-slate-400 hover:text-slate-700 transition-colors"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                       
                       <div className="text-xs mb-2">
@@ -303,9 +365,9 @@ export const CustomerInvoicesPage: React.FC = () => {
         </div>
 
         {/* Right Column: Invoice Details */}
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 print:col-span-3 print:w-full">
           {selectedInvoice ? (
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-card p-6 space-y-6">
+            <div id="printable-invoice-panel" className="bg-white rounded-3xl border border-slate-100 shadow-card p-6 space-y-6 print:border-none print:shadow-none print:p-0">
               {/* Header Info */}
               <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100">
                 <div>
@@ -472,23 +534,43 @@ export const CustomerInvoicesPage: React.FC = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-3 pt-4 border-t border-slate-100">
-                <button
-                  onClick={handleDownloadPDF}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold text-sm transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  Download PDF
-                </button>
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 print:hidden">
                 {selectedInvoice.outstandingBalance > 0 && (
                   <button
+                    type="button"
                     onClick={() => handlePayNow(selectedInvoice)}
-                    className="flex items-center gap-2 px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold text-sm shadow-md transition-all ml-auto"
+                    className="flex items-center gap-2 px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold text-sm shadow-md transition-all mr-auto"
                   >
                     <CreditCard className="w-4 h-4" />
                     Pay Now
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => handlePrintInvoice(selectedInvoice)}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold text-sm transition-colors shadow-xs"
+                >
+                  <Printer className="w-4 h-4 text-slate-600" />
+                  Print Invoice
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadPDF(selectedInvoice)}
+                  disabled={isDownloadingPDF}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-semibold text-sm transition-all shadow-md hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isDownloadingPDF ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Downloading...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      Download PDF
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           ) : (
