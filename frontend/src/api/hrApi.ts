@@ -96,6 +96,20 @@ export const hrApi = {
     );
   },
 
+  checkIn: async () => {
+    return apiWithRetry(
+      () => api.post('/hr/attendance/check-in'),
+      'checkIn'
+    );
+  },
+
+  checkOut: async () => {
+    return apiWithRetry(
+      () => api.post('/hr/attendance/check-out'),
+      'checkOut'
+    );
+  },
+
   getPayroll: async (params?: { month?: number; year?: number }) => {
     const key = generateRequestKey('/hr/payroll', params);
     const controller = createRequestController(key);

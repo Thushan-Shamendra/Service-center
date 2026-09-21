@@ -18,12 +18,29 @@ export const getAttendance = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const query = {};
-    if (req.query.employee) query.employee = req.query.employee;
+    if (req.user.role === 'employee') {
+      const emp = await Employee.findOne({ user: req.user._id });
+      if (emp) query.employee = emp._id;
+    } else if (req.query.employee) {
+      query.employee = req.query.employee;
+    }
+
     if (req.query.status) query.status = req.query.status;
-    if (req.query.startDate && req.query.endDate) {
+
+    if (req.query.date) {
+      const startOfDay = new Date(req.query.date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(req.query.date);
+      endOfDay.setHours(23, 59, 59, 999);
+      query.date = { $gte: startOfDay, $lte: endOfDay };
+    } else if (req.query.startDate && req.query.endDate) {
+      const start = new Date(req.query.startDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(req.query.endDate);
+      end.setHours(23, 59, 59, 999);
       query.date = {
-        $gte: new Date(req.query.startDate),
-        $lte: new Date(req.query.endDate),
+        $gte: start,
+        $lte: end,
       };
     }
 
@@ -146,26 +163,38 @@ export const checkIn = async (req, res) => {
     const employee = await Employee.findOne({ user: req.user._id });
     if (!employee) return res.status(404).json({ success: false, message: 'Employee profile not found' });
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
 
-    const existing = await Attendance.findOne({ employee: employee._id, date: today });
+    const existing = await Attendance.findOne({
+      employee: employee._id,
+      date: { $gte: startOfDay, $lte: endOfDay },
+    });
     if (existing && existing.checkIn) {
       return res.status(400).json({ success: false, message: 'Already checked in today' });
     }
 
-    const record = await Attendance.findOneAndUpdate(
-      { employee: employee._id, date: today },
-      {
-        employee: employee._id,
-        date: today,
-        status: 'present',
-        checkIn: new Date(),
-      },
-      { upsert: true, new: true }
-    );
+    const now = new Date();
+    const isLate = now.getHours() > 9 || (now.getHours() === 9 && now.getMinutes() > 15);
+    const status = isLate ? 'late' : 'present';
 
-    res.status(200).json({ success: true, data: record, message: 'Checked in successfully' });
+    const record = existing || new Attendance({
+      employee: employee._id,
+      date: startOfDay,
+    });
+
+    record.status = status;
+    record.checkIn = now;
+    if (isLate && !record.lateReason) {
+      record.lateReason = 'Checked in after 09:15 AM';
+    }
+    await record.save();
+
+    await record.populate({ path: 'employee', populate: { path: 'user', select: 'firstName lastName' } });
+
+    res.status(200).json({ success: true, data: record, message: `Checked in successfully as ${status}` });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -178,12 +207,18 @@ export const checkOut = async (req, res) => {
     const employee = await Employee.findOne({ user: req.user._id });
     if (!employee) return res.status(404).json({ success: false, message: 'Employee profile not found' });
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
 
-    const record = await Attendance.findOne({ employee: employee._id, date: today });
+    const record = await Attendance.findOne({
+      employee: employee._id,
+      date: { $gte: startOfDay, $lte: endOfDay },
+    });
+
     if (!record || !record.checkIn) {
-      return res.status(400).json({ success: false, message: 'Not checked in today' });
+      return res.status(400).json({ success: false, message: 'You have not checked in today' });
     }
     if (record.checkOut) {
       return res.status(400).json({ success: false, message: 'Already checked out today' });
@@ -191,13 +226,15 @@ export const checkOut = async (req, res) => {
 
     const checkOutTime = new Date();
     // Calculate hours worked with proper precision (round to 2 decimal places)
-    const hoursWorked = Math.round(((checkOutTime - record.checkIn) / (1000 * 60 * 60)) * 100) / 100;
+    const hoursWorked = Math.round(((checkOutTime - new Date(record.checkIn)) / (1000 * 60 * 60)) * 100) / 100;
     const overtimeHours = Math.round(Math.max(0, hoursWorked - 8) * 100) / 100;
 
     record.checkOut = checkOutTime;
     record.hoursWorked = hoursWorked;
     record.overtimeHours = overtimeHours;
     await record.save();
+
+    await record.populate({ path: 'employee', populate: { path: 'user', select: 'firstName lastName' } });
 
     res.status(200).json({ success: true, data: record, message: 'Checked out successfully' });
   } catch (error) {

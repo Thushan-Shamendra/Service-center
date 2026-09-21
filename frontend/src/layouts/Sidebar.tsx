@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   Star,
   ShieldCheck,
+  Clock,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -78,6 +79,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           { label: 'Repair Progress', path: '/employee/repair-progress', icon: Wrench },
           { label: 'Parts Requests', path: '/employee/parts-requests', icon: Package },
           { label: 'Final Inspection', path: '/employee/final-inspection', icon: CheckCircle2 },
+          { label: 'Attendance', path: '/employee/attendance', icon: Clock },
           { label: 'Leave Management', path: '/employee/leave-management', icon: Calendar },
           { label: 'Profile', path: '/employee/profile', icon: User },
         ];
