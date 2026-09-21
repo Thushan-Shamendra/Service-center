@@ -28,6 +28,6 @@ router
 
 router
   .route('/:id/status')
-  .put(authorize('administrator', 'manager'), updateAppointmentStatus);
+  .put(authorize('administrator', 'manager', 'customer'), updateAppointmentStatus);
 
 export default router;

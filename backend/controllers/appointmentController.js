@@ -184,7 +184,7 @@ export const updateAppointmentStatus = async (req, res) => {
       appointment.statusHistory.push({
         status,
         changedBy: req.user._id,
-        remarks: rejectionReason || (status === 'rescheduled' ? `Rescheduled to ${rescheduleDate || ''} ${rescheduleTime || ''}` : `Status changed to ${status}`),
+        remarks: req.body.remarks || rejectionReason || (status === 'rescheduled' ? `Rescheduled to ${rescheduleDate || ''} ${rescheduleTime || ''}` : status === 'cancelled' ? 'Appointment cancelled by customer' : `Status changed to ${status}`),
         changedAt: new Date(),
       });
     }

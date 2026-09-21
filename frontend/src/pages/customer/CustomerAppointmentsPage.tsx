@@ -1,11 +1,34 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useSearchParams } from 'react-router-dom';
 import { appointmentApi } from '../../api/appointmentApi';
 import { vehicleApi } from '../../api/vehicleApi';
 import { serviceApi } from '../../api/serviceApi';
 import toast from 'react-hot-toast';
-import { Calendar, Plus, Check, X, Clock, Eye, Upload, Send, XCircle, Car, AlertCircle, Clock as ClockIcon, Search, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  Calendar,
+  Plus,
+  Check,
+  X,
+  Clock,
+  Upload,
+  Send,
+  XCircle,
+  Car,
+  AlertCircle,
+  Search,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  CheckCircle2,
+  AlertTriangle,
+  Wrench,
+  User,
+  CalendarCheck,
+  CalendarPlus,
+  History,
+  Info,
+} from 'lucide-react';
 import { formatDate } from '../../utils/formatters';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { ErrorState } from '../../components/ui/ErrorState';
@@ -58,6 +81,7 @@ interface Appointment {
   };
   rescheduleDate?: string;
   rescheduleTime?: string;
+  rejectionReason?: string;
   status: 'pending' | 'approved' | 'rejected' | 'rescheduled' | 'cancelled' | 'completed';
   statusHistory?: StatusHistoryEntry[];
   createdAt: string;
@@ -66,35 +90,23 @@ interface Appointment {
 export const CustomerAppointmentsPage: React.FC = () => {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
+
+  // Master appointments list
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+
+  // Loading and error states
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingServices, setIsLoadingServices] = useState(false);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Form states
   const [showForm, setShowForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Check if we should show the form by default (for direct booking)
-  useEffect(() => {
-    if (searchParams.get('new') === 'true') {
-      setShowForm(true);
-    }
-  }, [searchParams]);
-
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(5);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
-
-  // Filter state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
-
   const [formData, setFormData] = useState({
     vehicle: '',
     serviceType: '',
@@ -103,59 +115,55 @@ export const CustomerAppointmentsPage: React.FC = () => {
     complaint: '',
     images: [] as string[],
   });
-
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [expandedAppointment, setExpandedAppointment] = useState<string | null>(null);
 
-  // Auto-refresh appointments every 30 seconds to show latest status changes
+  // Cancellation modal state
+  const [cancellingAppointment, setCancellingAppointment] = useState<Appointment | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  // Timeline modal state
+  const [timelineAppointment, setTimelineAppointment] = useState<Appointment | null>(null);
+
+  // History filtering and pagination state
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('all');
+  const [historyDateFilter, setHistoryDateFilter] = useState('all');
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyItemsPerPage, setHistoryItemsPerPage] = useState(5);
+
+  // Check URL params for direct booking trigger
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (!isLoading && user) {
-        fetchAppointments();
-      }
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [isLoading, user, currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter]);
+    if (searchParams.get('new') === 'true') {
+      setShowForm(true);
+    }
+  }, [searchParams]);
 
-  const fetchAppointments = async () => {
+  // Fetch appointments for the current customer
+  const fetchAppointments = useCallback(async (silent = false) => {
+    if (!silent) setIsRefreshing(true);
     try {
       const customerId = user?.profile?._id || user?._id;
-      const params: any = {
+      // Fetch up to 200 records to ensure all active and historical items are retrieved
+      const response = await appointmentApi.getAppointments({
         customer: customerId,
-        page: currentPage,
-        limit: itemsPerPage,
-      };
-
-      // Add filters
-      if (statusFilter !== 'all') params.status = statusFilter;
-      if (searchQuery) params.search = searchQuery;
-      if (dateFilter === 'today') {
-        params.date = new Date().toISOString().split('T')[0];
-      } else if (dateFilter === 'week') {
-        const today = new Date();
-        const startOfWeek = new Date(today.setDate(today.getDate() - today.getDay()));
-        const endOfWeek = new Date(today.setDate(today.getDate() - today.getDay() + 6));
-        params.startDate = startOfWeek.toISOString().split('T')[0];
-        params.endDate = endOfWeek.toISOString().split('T')[0];
-      }
-
-      const response = await appointmentApi.getAppointments(params);
+        limit: 200,
+      });
       if (response.success) {
-        setAppointments(response.data);
-        setTotalPages(response.pagination?.pages || 1);
-        setTotalItems(response.pagination?.total || 0);
+        setAppointments(response.data || []);
       }
     } catch (err: any) {
       console.error('Error fetching appointments:', err);
+    } finally {
+      if (!silent) setIsRefreshing(false);
     }
-  };
+  }, [user]);
 
   const fetchVehicles = async () => {
     try {
       const customerId = user?.profile?._id || user?._id;
       const response = await vehicleApi.getVehicles({ customer: customerId });
       if (response.success) {
-        setVehicles(response.data);
+        setVehicles(response.data || []);
       }
     } catch (err: any) {
       console.error('Error fetching vehicles:', err);
@@ -167,7 +175,7 @@ export const CustomerAppointmentsPage: React.FC = () => {
     try {
       const response = await serviceApi.getServices({ status: 'active' });
       if (response.success) {
-        setServices(response.data);
+        setServices(response.data || []);
       }
     } catch (err: any) {
       console.error('Error fetching services:', err);
@@ -181,12 +189,11 @@ export const CustomerAppointmentsPage: React.FC = () => {
       setTimeSlots([]);
       return;
     }
-    
     setIsLoadingSlots(true);
     try {
       const response = await appointmentApi.getAvailableTimeSlots(date);
       if (response.success) {
-        setTimeSlots(response.data);
+        setTimeSlots(response.data || []);
       }
     } catch (err: any) {
       console.error('Error fetching time slots:', err);
@@ -196,40 +203,203 @@ export const CustomerAppointmentsPage: React.FC = () => {
     }
   };
 
+  // Initial load
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
       try {
-        await Promise.all([fetchAppointments(), fetchVehicles(), fetchServices()]);
+        await Promise.all([fetchAppointments(true), fetchVehicles(), fetchServices()]);
       } catch (err) {
-        setError('Failed to load data');
+        setError('Failed to load appointment data');
       } finally {
         setIsLoading(false);
       }
     };
-    loadData();
-  }, [user]);
-
-  // Check if we should show the form by default (for direct booking)
-  useEffect(() => {
-    if (searchParams.get('new') === 'true') {
-      setShowForm(true);
+    if (user) {
+      loadData();
     }
-  }, [searchParams]);
+  }, [user, fetchAppointments]);
 
-  // Fetch appointments when pagination or filters change (excluding initial load)
+  // Auto-refresh appointments every 30 seconds
   useEffect(() => {
-    if (!isLoading && user) {
-      fetchAppointments();
-    }
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter]);
+    const interval = setInterval(() => {
+      if (!isLoading && user) {
+        fetchAppointments(true);
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [isLoading, user, fetchAppointments]);
 
+  // Fetch time slots when preferred date changes
   useEffect(() => {
     if (formData.preferredDate) {
       fetchTimeSlots(formData.preferredDate);
+    } else {
+      setTimeSlots([]);
     }
   }, [formData.preferredDate]);
 
+  // Helper for technician name
+  const getTechnicianName = (apt: Appointment) => {
+    const tech = apt.assignedTechnician;
+    if (!tech) {
+      if (apt.status === 'pending') return 'Pending Assignment';
+      if (apt.status === 'approved' || apt.status === 'rescheduled') return 'To be Assigned';
+      return '—';
+    }
+    if (tech.user?.firstName) {
+      return `${tech.user.firstName} ${tech.user.lastName ? tech.user.lastName.charAt(0) + '.' : ''}`.trim();
+    }
+    if (tech.firstName) {
+      return `${tech.firstName} ${tech.lastName ? tech.lastName.charAt(0) + '.' : ''}`.trim();
+    }
+    return 'Assigned Technician';
+  };
+
+  // Status Badge Component
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+            <Clock className="w-3 h-3 text-amber-600" />
+            Pending Review
+          </span>
+        );
+      case 'approved':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+            Approved
+          </span>
+        );
+      case 'rescheduled':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+            <Calendar className="w-3 h-3 text-blue-600" />
+            Rescheduled
+          </span>
+        );
+      case 'rejected':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-200">
+            <XCircle className="w-3 h-3 text-rose-600" />
+            Declined
+          </span>
+        );
+      case 'completed':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-teal-100 text-teal-800 border border-teal-200">
+            <Check className="w-3 h-3 text-teal-600" />
+            Completed
+          </span>
+        );
+      case 'cancelled':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+            <XCircle className="w-3 h-3 text-slate-400" />
+            Cancelled
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">
+            {status}
+          </span>
+        );
+    }
+  };
+
+  // Section 1: Pending Appointments
+  const pendingAppointments = useMemo(() => {
+    return appointments
+      .filter((a) => a.status === 'pending')
+      .sort((a, b) => new Date(a.preferredDate).getTime() - new Date(b.preferredDate).getTime());
+  }, [appointments]);
+
+  // Section 1: Upcoming Appointments (Approved & Rescheduled)
+  const upcomingAppointments = useMemo(() => {
+    return appointments
+      .filter((a) => a.status === 'approved' || a.status === 'rescheduled')
+      .sort((a, b) => {
+        const dateA = a.status === 'rescheduled' && a.rescheduleDate ? a.rescheduleDate : a.preferredDate;
+        const dateB = b.status === 'rescheduled' && b.rescheduleDate ? b.rescheduleDate : b.preferredDate;
+        return new Date(dateA).getTime() - new Date(dateB).getTime();
+      });
+  }, [appointments]);
+
+  // Section 2: Rejected Requests
+  const rejectedAppointments = useMemo(() => {
+    return appointments
+      .filter((a) => a.status === 'rejected')
+      .sort((a, b) => new Date(b.createdAt || b.preferredDate).getTime() - new Date(a.createdAt || a.preferredDate).getTime());
+  }, [appointments]);
+
+  // Section 3: History Appointments (Completed, Cancelled, and past appointments)
+  const historyAppointments = useMemo(() => {
+    return appointments.filter((a) => ['completed', 'cancelled', 'rejected'].includes(a.status));
+  }, [appointments]);
+
+  // Filtered & Paginated History
+  const filteredHistory = useMemo(() => {
+    return historyAppointments
+      .filter((apt) => {
+        // Status filter
+        if (historyStatusFilter !== 'all' && apt.status !== historyStatusFilter) {
+          return false;
+        }
+
+        // Search query
+        if (historySearch.trim()) {
+          const query = historySearch.toLowerCase();
+          const aptNum = (apt.appointmentNumber || '').toLowerCase();
+          const reg = (apt.vehicle?.registrationNumber || '').toLowerCase();
+          const vMake = (apt.vehicle?.make || '').toLowerCase();
+          const vModel = (apt.vehicle?.model || '').toLowerCase();
+          const service = (apt.serviceType || '').toLowerCase();
+          const techName = getTechnicianName(apt).toLowerCase();
+          if (
+            !aptNum.includes(query) &&
+            !reg.includes(query) &&
+            !vMake.includes(query) &&
+            !vModel.includes(query) &&
+            !service.includes(query) &&
+            !techName.includes(query)
+          ) {
+            return false;
+          }
+        }
+
+        // Date filter
+        if (historyDateFilter === 'today') {
+          const todayStr = new Date().toISOString().split('T')[0];
+          const aptDateStr = new Date(apt.preferredDate).toISOString().split('T')[0];
+          if (aptDateStr !== todayStr) return false;
+        } else if (historyDateFilter === 'week') {
+          const now = new Date();
+          const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          const aptDate = new Date(apt.preferredDate);
+          if (aptDate < weekAgo) return false;
+        } else if (historyDateFilter === 'month') {
+          const now = new Date();
+          const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          const aptDate = new Date(apt.preferredDate);
+          if (aptDate < monthAgo) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => new Date(b.preferredDate).getTime() - new Date(a.preferredDate).getTime());
+  }, [historyAppointments, historyStatusFilter, historySearch, historyDateFilter]);
+
+  const historyTotalPages = Math.max(1, Math.ceil(filteredHistory.length / historyItemsPerPage));
+
+  const paginatedHistory = useMemo(() => {
+    const start = (historyPage - 1) * historyItemsPerPage;
+    return filteredHistory.slice(start, start + historyItemsPerPage);
+  }, [filteredHistory, historyPage, historyItemsPerPage]);
+
+  // Form submission handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -259,7 +429,7 @@ export const CustomerAppointmentsPage: React.FC = () => {
       });
 
       if (response.success) {
-        toast.success('Appointment request submitted successfully');
+        toast.success('Appointment request submitted successfully!');
         setShowForm(false);
         setFormData({
           vehicle: '',
@@ -269,7 +439,7 @@ export const CustomerAppointmentsPage: React.FC = () => {
           complaint: '',
           images: [],
         });
-        await fetchAppointments();
+        await fetchAppointments(true);
       } else {
         toast.error(response.message || 'Failed to submit appointment');
       }
@@ -280,113 +450,179 @@ export const CustomerAppointmentsPage: React.FC = () => {
     }
   };
 
-  const handleCancel = () => {
-    setShowForm(false);
+  // Re-book from a rejected or completed appointment
+  const handleRebook = (apt: Appointment) => {
     setFormData({
-      vehicle: '',
-      serviceType: '',
+      vehicle: apt.vehicle?._id || '',
+      serviceType: apt.serviceType || '',
       preferredDate: '',
       preferredTime: '',
-      complaint: '',
+      complaint: apt.complaint ? `Re-booking for previous ${apt.appointmentNumber}: ${apt.complaint}` : '',
       images: [],
     });
-    setErrors({});
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleFilterChange = (filterType: string, value: string) => {
-    setCurrentPage(1); // Reset to page 1 when filters change
-    if (filterType === 'status') setStatusFilter(value);
-    if (filterType === 'date') setDateFilter(value);
-    if (filterType === 'search') setSearchQuery(value);
-  };
+  // Cancel appointment confirmation
+  const handleConfirmCancel = async () => {
+    if (!cancellingAppointment) return;
+    setIsCancelling(true);
+    try {
+      // Attempt status update API
+      let res;
+      try {
+        res = await appointmentApi.updateStatus(cancellingAppointment._id, {
+          status: 'cancelled',
+          remarks: 'Cancelled by customer',
+        });
+      } catch {
+        // Fallback to updateAppointment
+        res = await appointmentApi.updateAppointment(cancellingAppointment._id, {
+          status: 'cancelled',
+        });
+      }
 
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
-  };
-
-  const handleItemsPerPageChange = (items: number) => {
-    setItemsPerPage(items);
-    setCurrentPage(1); // Reset to page 1 when page size changes
-  };
-
-  const getStatusBadge = (status: string) => {
-    const statusStyles: Record<string, { bg: string; text: string; icon: any }> = {
-      pending: { bg: 'bg-amber-100', text: 'text-amber-700', icon: Clock },
-      approved: { bg: 'bg-emerald-100', text: 'text-emerald-700', icon: Check },
-      rejected: { bg: 'bg-red-100', text: 'text-red-700', icon: X },
-      rescheduled: { bg: 'bg-blue-100', text: 'text-blue-700', icon: Calendar },
-      cancelled: { bg: 'bg-slate-100', text: 'text-slate-700', icon: XCircle },
-      completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', icon: Check },
-    };
-
-    const style = statusStyles[status] || statusStyles.pending;
-    const Icon = style.icon;
-
-    return (
-      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${style.bg} ${style.text}`}>
-        <Icon className="w-3 h-3" />
-        {status.charAt(0).toUpperCase() + status.slice(1)}
-      </span>
-    );
-  };
-
-  const getStatusHistoryBadge = (status: string) => {
-    const statusStyles: Record<string, string> = {
-      pending: 'bg-amber-100 text-amber-700',
-      approved: 'bg-emerald-100 text-emerald-700',
-      rejected: 'bg-red-100 text-red-700',
-      rescheduled: 'bg-blue-100 text-blue-700',
-      cancelled: 'bg-slate-100 text-slate-700',
-      completed: 'bg-emerald-100 text-emerald-700',
-    };
-    return statusStyles[status] || statusStyles.pending;
+      if (res.success || res.data) {
+        toast.success(`Appointment ${cancellingAppointment.appointmentNumber} cancelled`);
+        setCancellingAppointment(null);
+        await fetchAppointments(true);
+      } else {
+        toast.error(res.message || 'Failed to cancel appointment');
+      }
+    } catch (err: any) {
+      console.error('Error cancelling appointment:', err);
+      toast.error(err.response?.data?.message || 'Error cancelling appointment');
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
   if (isLoading) return <LoadingSkeleton />;
   if (error) return <ErrorState message={error} onRetry={() => window.location.reload()} />;
 
+  const completedCount = appointments.filter((a) => a.status === 'completed').length;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 max-w-7xl mx-auto pb-12">
+      {/* Top Header & Page Summary */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Appointment bookings</h1>
-          <p className="text-sm text-slate-500">Request and manage your vehicle service appointments</p>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Appointment Bookings</h1>
+            {isRefreshing && (
+              <RefreshCw className="w-4 h-4 text-brand-600 animate-spin" title="Updating..." />
+            )}
+          </div>
+          <p className="text-sm text-slate-500 mt-1">
+            Request, track, and manage your vehicle maintenance and service schedules
+          </p>
         </div>
-        {!showForm && (
+
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl hover:bg-brand-700 transition-colors"
+            onClick={() => fetchAppointments()}
+            className="p-2.5 text-slate-600 hover:text-slate-900 border border-slate-200 bg-white rounded-xl hover:bg-slate-50 transition-colors shadow-sm"
+            title="Refresh appointments"
           >
-            <Plus className="w-4 h-4" />
-            Request Appointment
+            <RefreshCw className="w-4 h-4" />
           </button>
-        )}
+          {!showForm ? (
+            <button
+              onClick={() => {
+                setShowForm(true);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-medium shadow-sm hover:shadow transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              Request Appointment
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowForm(false)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium transition-colors"
+            >
+              <X className="w-4 h-4" />
+              Close Form
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Request Appointment Form */}
+      {/* Metric / Status Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* Pending Card */}
+        <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-4 flex items-center gap-3.5 transition-all">
+          <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+            <Clock className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-amber-800 uppercase tracking-wider">Pending</p>
+            <p className="text-2xl font-bold text-amber-950 mt-0.5">{pendingAppointments.length}</p>
+          </div>
+        </div>
+
+        {/* Upcoming Card */}
+        <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-2xl p-4 flex items-center gap-3.5 transition-all">
+          <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+            <CalendarCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-emerald-800 uppercase tracking-wider">Upcoming</p>
+            <p className="text-2xl font-bold text-emerald-950 mt-0.5">{upcomingAppointments.length}</p>
+          </div>
+        </div>
+
+        {/* Declined Card */}
+        <div className="bg-rose-50/70 border border-rose-200/80 rounded-2xl p-4 flex items-center gap-3.5 transition-all">
+          <div className="w-11 h-11 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-rose-800 uppercase tracking-wider">Declined</p>
+            <p className="text-2xl font-bold text-rose-950 mt-0.5">{rejectedAppointments.length}</p>
+          </div>
+        </div>
+
+        {/* Completed Card */}
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center gap-3.5 transition-all">
+          <div className="w-11 h-11 rounded-xl bg-slate-200 text-slate-700 flex items-center justify-center shrink-0">
+            <Check className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Completed</p>
+            <p className="text-2xl font-bold text-slate-900 mt-0.5">{completedCount}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Appointment Request Form */}
       {showForm && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
-          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
-            <h2 className="text-lg font-bold text-slate-900">Request Appointment</h2>
+        <div className="bg-white rounded-2xl border border-brand-200 shadow-lg overflow-hidden transition-all">
+          <div className="px-6 py-4 border-b border-brand-100 bg-brand-50/50 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center">
+                <CalendarPlus className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Request New Service Appointment</h2>
+                <p className="text-xs text-slate-500">Pick your vehicle and select an open time slot</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowForm(false)}
+              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
           <form onSubmit={handleSubmit} className="p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Appointment ID - Auto Generated */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                  Appointment ID
-                </label>
-                <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-600 text-sm">
-                  <AlertCircle className="w-4 h-4 text-slate-400" />
-                  <span>Auto Generated</span>
-                </div>
-              </div>
-
               {/* Vehicle Dropdown */}
               <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                   Vehicle <span className="text-red-500">*</span>
                 </label>
                 <select
@@ -395,24 +631,28 @@ export const CustomerAppointmentsPage: React.FC = () => {
                     setFormData({ ...formData, vehicle: e.target.value });
                     if (errors.vehicle) setErrors({ ...errors, vehicle: '' });
                   }}
-                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${
-                    errors.vehicle ? 'border-red-500' : 'border-slate-300'
+                  className={`w-full px-3.5 py-2.5 bg-slate-50/50 border rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors ${
+                    errors.vehicle ? 'border-red-500 bg-red-50/30' : 'border-slate-300'
                   }`}
                 >
-                  <option value="">Select Vehicle</option>
+                  <option value="">Select Registered Vehicle</option>
                   {vehicles.map((v) => (
                     <option key={v._id} value={v._id}>
-                      {v.registrationNumber} - {v.make} {v.model}
+                      {v.registrationNumber} — {v.make} {v.model}
                     </option>
                   ))}
                 </select>
                 {errors.vehicle && <p className="text-xs text-red-500 mt-1">{errors.vehicle}</p>}
-                <p className="text-[10px] text-slate-400 mt-1">(Registered Vehicles Only)</p>
+                {vehicles.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    No vehicles registered yet. Please register a vehicle in your profile first.
+                  </p>
+                )}
               </div>
 
               {/* Service Type */}
               <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                   Service Type <span className="text-red-500">*</span>
                 </label>
                 <select
@@ -422,16 +662,16 @@ export const CustomerAppointmentsPage: React.FC = () => {
                     if (errors.serviceType) setErrors({ ...errors, serviceType: '' });
                   }}
                   disabled={isLoadingServices}
-                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${
-                    errors.serviceType ? 'border-red-500' : 'border-slate-300'
+                  className={`w-full px-3.5 py-2.5 bg-slate-50/50 border rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors ${
+                    errors.serviceType ? 'border-red-500 bg-red-50/30' : 'border-slate-300'
                   } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   <option value="">
-                    {isLoadingServices ? 'Loading services...' : 'Select Service Type'}
+                    {isLoadingServices ? 'Loading active services...' : 'Select Service Type'}
                   </option>
                   {services.map((service) => (
                     <option key={service._id} value={service.name}>
-                      {service.name} ({service.serviceCode})
+                      {service.name} ({service.serviceCode}) - ~{service.estimatedDurationMinutes || 60} mins
                     </option>
                   ))}
                 </select>
@@ -440,167 +680,119 @@ export const CustomerAppointmentsPage: React.FC = () => {
 
               {/* Preferred Date */}
               <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                   Preferred Date <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="date"
                   value={formData.preferredDate}
                   onChange={(e) => {
-                    setFormData({ ...formData, preferredDate: e.target.value });
+                    setFormData({ ...formData, preferredDate: e.target.value, preferredTime: '' });
                     if (errors.preferredDate) setErrors({ ...errors, preferredDate: '' });
                   }}
                   min={new Date().toISOString().split('T')[0]}
-                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${
-                    errors.preferredDate ? 'border-red-500' : 'border-slate-300'
+                  className={`w-full px-3.5 py-2.5 bg-slate-50/50 border rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-colors ${
+                    errors.preferredDate ? 'border-red-500 bg-red-50/30' : 'border-slate-300'
                   }`}
                 />
                 {errors.preferredDate && <p className="text-xs text-red-500 mt-1">{errors.preferredDate}</p>}
               </div>
 
-              {/* Preferred Time */}
+              {/* Preferred Time Slot */}
               <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                  Preferred Time <span className="text-red-500">*</span>
+                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Preferred Time Slot <span className="text-red-500">*</span>
                 </label>
                 {!formData.preferredDate ? (
-                  <div className="px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-500 text-sm">
-                    Please select a date first
+                  <div className="px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 text-sm flex items-center gap-2">
+                    <Info className="w-4 h-4 text-slate-400" />
+                    Please pick a date first to view open slots
                   </div>
                 ) : isLoadingSlots ? (
-                  <div className="px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-500 text-sm">
-                    Loading available slots...
+                  <div className="px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 text-sm flex items-center gap-2">
+                    <div className="w-3.5 h-3.5 border-2 border-brand-600 border-t-transparent rounded-full animate-spin" />
+                    Checking slot availability...
                   </div>
                 ) : timeSlots.length === 0 ? (
-                  <div className="px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-500 text-sm">
-                    No time slots available
+                  <div className="px-3.5 py-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 text-sm">
+                    No time slots available for this date. Please select another date.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 gap-2">
-                    {timeSlots.map((slot) => {
-                      const isAvailable = slot.status === 'available';
-                      const isLimited = slot.status === 'limited';
-                      const isFull = slot.status === 'full';
-                      
-                      return (
-                        <button
-                          key={slot.time}
-                          type="button"
-                          onClick={() => {
-                            if (isAvailable || isLimited) {
-                              setFormData({ ...formData, preferredTime: slot.time });
-                              if (errors.preferredTime) setErrors({ ...errors, preferredTime: '' });
-                            }
-                          }}
-                          disabled={isFull}
-                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                            formData.preferredTime === slot.time
-                              ? 'bg-brand-600 text-white border-2 border-brand-600'
-                              : isFull
-                              ? 'bg-red-50 text-red-400 border-2 border-red-200 cursor-not-allowed opacity-60'
-                              : isLimited
-                              ? 'bg-amber-50 text-amber-700 border-2 border-amber-200 hover:bg-amber-100'
-                              : 'bg-emerald-50 text-emerald-700 border-2 border-emerald-200 hover:bg-emerald-100'
-                          }`}
-                        >
-                          <div className="flex items-center justify-center gap-1">
-                            <ClockIcon className="w-3 h-3" />
-                            {slot.time}
-                          </div>
-                          {isFull && (
-                            <div className="text-[10px] mt-0.5">Full</div>
-                          )}
-                          {isLimited && (
-                            <div className="text-[10px] mt-0.5">{slot.bookings}/4</div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                {errors.preferredTime && <p className="text-xs text-red-500 mt-1">{errors.preferredTime}</p>}
-                {formData.preferredDate && !isLoadingSlots && timeSlots.length > 0 && (
-                  <div className="flex items-center gap-4 mt-2 text-[10px] text-slate-500">
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-emerald-200"></div>
-                      Available
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-amber-200"></div>
-                      Limited
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-red-200"></div>
-                      Full
-                    </div>
-                  </div>
-                )}
-              </div>
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                      {timeSlots.map((slot) => {
+                        const isAvailable = slot.status === 'available';
+                        const isLimited = slot.status === 'limited';
+                        const isFull = slot.status === 'full';
+                        const isSelected = formData.preferredTime === slot.time;
 
-              {/* Request Date - Auto */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                  Request Date
-                </label>
-                <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-600 text-sm">
-                  <Calendar className="w-4 h-4 text-slate-400" />
-                  <span>{new Date().toLocaleDateString()}</span>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">(Current Date - Auto)</p>
+                        return (
+                          <button
+                            key={slot.time}
+                            type="button"
+                            onClick={() => {
+                              if (!isFull) {
+                                setFormData({ ...formData, preferredTime: slot.time });
+                                if (errors.preferredTime) setErrors({ ...errors, preferredTime: '' });
+                              }
+                            }}
+                            disabled={isFull}
+                            className={`px-2.5 py-2 rounded-xl text-xs font-medium border text-center transition-all ${
+                              isSelected
+                                ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                                : isFull
+                                ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed line-through'
+                                : isLimited
+                                ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                            }`}
+                          >
+                            <div className="font-semibold">{slot.time}</div>
+                            <div className="text-[10px] mt-0.5 opacity-80">
+                              {isFull ? 'Booked' : isLimited ? 'Limited' : 'Available'}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {errors.preferredTime && (
+                      <p className="text-xs text-red-500">{errors.preferredTime}</p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Complaint/Problem Description */}
+            {/* Complaint / Problem Description */}
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                Complaint / Problem Description
+              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                Problem Description / Service Notes <span className="text-slate-400">(Optional)</span>
               </label>
               <textarea
                 value={formData.complaint}
                 onChange={(e) => setFormData({ ...formData, complaint: e.target.value })}
-                rows={4}
-                placeholder="Describe the issue or problem with your vehicle..."
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-none"
+                rows={3}
+                placeholder="Mention any symptoms, strange noises, warning indicators, or specific checks you need..."
+                className="w-full px-3.5 py-2.5 bg-slate-50/50 border border-slate-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-none transition-colors"
               />
-            </div>
-
-            {/* Upload Images */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                Upload Images <span className="text-slate-400">(Optional)</span>
-              </label>
-              <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-brand-500 transition-colors">
-                <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                <p className="text-sm text-slate-600">Click to upload or drag and drop</p>
-                <p className="text-xs text-slate-400 mt-1">PNG, JPG up to 5MB</p>
-              </div>
-            </div>
-
-            {/* Status - Auto */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
-                Status
-              </label>
-              <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg">
-                {getStatusBadge('pending')}
-              </div>
-              <p className="text-[10px] text-slate-400 mt-1">(Pending Approval - Auto)</p>
             </div>
 
             {/* Actions */}
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
               <button
                 type="button"
-                onClick={handleCancel}
-                className="flex items-center gap-2 px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                onClick={() => {
+                  setShowForm(false);
+                  setErrors({});
+                }}
+                className="px-4 py-2 text-slate-700 hover:bg-slate-100 rounded-xl text-sm font-medium transition-colors"
               >
-                <XCircle className="w-4 h-4" />
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-sm font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? (
                   <>
@@ -619,307 +811,704 @@ export const CustomerAppointmentsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Appointment History */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
-        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900">Appointment History</h2>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">Show:</span>
-              <select
-                value={itemsPerPage}
-                onChange={(e) => handleItemsPerPageChange(Number(e.target.value))}
-                className="px-2 py-1 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              >
-                <option value={5}>5</option>
-                <option value={10}>10</option>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-              </select>
-              <span className="text-xs text-slate-500">per page</span>
+      {/* ========================================================================= */}
+      {/* SECTION 1: SIDE-BY-SIDE GRID (PENDING APPOINTMENTS & UPCOMING APPOINTMENTS) */}
+      {/* ========================================================================= */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Column: Pending Appointments */}
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm flex flex-col overflow-hidden">
+          {/* Section Header */}
+          <div className="px-6 py-4 border-b border-slate-100 bg-amber-50/30 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  Pending Appointments
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-200 text-amber-900">
+                    {pendingAppointments.length}
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-500">Awaiting workshop review and slot approval</p>
+              </div>
             </div>
+          </div>
+
+          {/* Body Cards */}
+          <div className="p-6 flex-1 bg-slate-50/30">
+            {pendingAppointments.length === 0 ? (
+              <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-6 border-2 border-dashed border-slate-200 rounded-2xl bg-white">
+                <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center mb-3">
+                  <Clock className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900">No Pending Requests</h3>
+                <p className="text-xs text-slate-500 max-w-xs mt-1">
+                  All your service requests have been reviewed. You don't have any appointments currently waiting for approval.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {pendingAppointments.map((apt) => (
+                  <div
+                    key={apt._id}
+                    className="bg-white border border-amber-200/70 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
+                  >
+                    <div className="absolute top-0 left-0 w-1 h-full bg-amber-400" />
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div>
+                        <span className="text-xs font-bold font-mono text-brand-600">
+                          {apt.appointmentNumber}
+                        </span>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <Car className="w-4 h-4 text-slate-500" />
+                          <span className="text-sm font-bold text-slate-900">
+                            {apt.vehicle?.registrationNumber || 'N/A'}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            ({apt.vehicle?.make} {apt.vehicle?.model})
+                          </span>
+                        </div>
+                      </div>
+                      {getStatusBadge(apt.status)}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 bg-amber-50/40 rounded-lg p-2.5 mb-3 border border-amber-100">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Service</span>
+                        <span className="font-semibold text-slate-800">{apt.serviceType}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Requested Date</span>
+                        <span className="font-medium text-slate-800">
+                          {formatDate(apt.preferredDate)} • {apt.preferredTime}
+                        </span>
+                      </div>
+                    </div>
+
+                    {apt.complaint && (
+                      <div className="text-xs text-slate-600 bg-slate-50 rounded-lg p-2.5 mb-3 border border-slate-100">
+                        <span className="font-semibold text-slate-700">Note: </span>
+                        {apt.complaint}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+                      <button
+                        onClick={() => setTimelineAppointment(apt)}
+                        className="flex items-center gap-1 text-slate-600 hover:text-brand-600 font-medium transition-colors"
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        {apt.statusHistory?.length || 0} Updates
+                      </button>
+
+                      <button
+                        onClick={() => setCancellingAppointment(apt)}
+                        className="flex items-center gap-1 text-rose-600 hover:text-rose-700 font-medium hover:underline transition-colors"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Cancel Request
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Search */}
-            <div className="relative flex-1 min-w-[200px]">
+        {/* Right Column: Upcoming / Approved Appointments */}
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm flex flex-col overflow-hidden">
+          {/* Section Header */}
+          <div className="px-6 py-4 border-b border-slate-100 bg-emerald-50/30 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                <CalendarCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  Upcoming Appointments
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-200 text-emerald-900">
+                    {upcomingAppointments.length}
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-500">Confirmed & scheduled workshop visits</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Body Cards */}
+          <div className="p-6 flex-1 bg-slate-50/30">
+            {upcomingAppointments.length === 0 ? (
+              <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center p-6 border-2 border-dashed border-slate-200 rounded-2xl bg-white">
+                <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-3">
+                  <CalendarCheck className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900">No Upcoming Appointments</h3>
+                <p className="text-xs text-slate-500 max-w-xs mt-1 mb-4">
+                  You don't have any confirmed appointments scheduled right now. Need maintenance or repairs?
+                </p>
+                <button
+                  onClick={() => {
+                    setShowForm(true);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors shadow-sm"
+                >
+                  + Book Appointment
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {upcomingAppointments.map((apt) => {
+                  const isRescheduled = apt.status === 'rescheduled';
+                  const activeDate = isRescheduled && apt.rescheduleDate ? apt.rescheduleDate : apt.preferredDate;
+                  const activeTime = isRescheduled && apt.rescheduleTime ? apt.rescheduleTime : apt.preferredTime;
+
+                  return (
+                    <div
+                      key={apt._id}
+                      className="bg-white border border-emerald-200/70 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden"
+                    >
+                      <div className={`absolute top-0 left-0 w-1 h-full ${isRescheduled ? 'bg-blue-500' : 'bg-emerald-500'}`} />
+                      
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div>
+                          <span className="text-xs font-bold font-mono text-brand-600">
+                            {apt.appointmentNumber}
+                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <Car className="w-4 h-4 text-slate-500" />
+                            <span className="text-sm font-bold text-slate-900">
+                              {apt.vehicle?.registrationNumber || 'N/A'}
+                            </span>
+                            <span className="text-xs text-slate-500">
+                              ({apt.vehicle?.make} {apt.vehicle?.model})
+                            </span>
+                          </div>
+                        </div>
+                        {getStatusBadge(apt.status)}
+                      </div>
+
+                      {/* Rescheduled Notice Banner */}
+                      {isRescheduled && (
+                        <div className="mb-2.5 p-2 bg-blue-50/80 border border-blue-200 rounded-lg text-xs text-blue-900 flex items-start gap-2">
+                          <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-semibold">Rescheduled by workshop: </span>
+                            New proposed slot is on {formatDate(activeDate)} at {activeTime}.
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 bg-emerald-50/30 rounded-lg p-2.5 mb-3 border border-emerald-100">
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase font-semibold">Service</span>
+                          <span className="font-semibold text-slate-800">{apt.serviceType}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px] uppercase font-semibold">Confirmed Slot</span>
+                          <span className="font-semibold text-emerald-900">
+                            {formatDate(activeDate)} • {activeTime}
+                          </span>
+                        </div>
+                        <div className="col-span-2 pt-1 border-t border-emerald-100/80 flex items-center justify-between">
+                          <span className="text-slate-500 text-[11px] flex items-center gap-1">
+                            <User className="w-3 h-3 text-slate-400" />
+                            Technician:
+                          </span>
+                          <span className="font-medium text-slate-800 text-[11px]">
+                            {getTechnicianName(apt)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+                        <button
+                          onClick={() => setTimelineAppointment(apt)}
+                          className="flex items-center gap-1 text-slate-600 hover:text-brand-600 font-medium transition-colors"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                          {apt.statusHistory?.length || 0} Updates
+                        </button>
+
+                        <button
+                          onClick={() => setCancellingAppointment(apt)}
+                          className="flex items-center gap-1 text-slate-500 hover:text-rose-600 font-medium transition-colors"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                          Cancel Appointment
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* SECTION 2: REJECTED / DECLINED REQUESTS (Action Required) */}
+      {/* ========================================================================= */}
+      {rejectedAppointments.length > 0 && (
+        <div className="bg-white rounded-2xl border border-rose-200/90 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-rose-100 bg-rose-50/40 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  Declined Requests
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-200 text-rose-900">
+                    {rejectedAppointments.length}
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Appointments that could not be confirmed by the service center. Pick a new slot to re-book.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6 bg-slate-50/30">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {rejectedAppointments.map((apt) => (
+                <div
+                  key={apt._id}
+                  className="bg-white border border-rose-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden flex flex-col justify-between"
+                >
+                  <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-500" />
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div>
+                        <span className="text-xs font-mono font-bold text-brand-600">
+                          {apt.appointmentNumber}
+                        </span>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <Car className="w-4 h-4 text-slate-500" />
+                          <span className="text-sm font-bold text-slate-900">
+                            {apt.vehicle?.registrationNumber || 'N/A'}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            ({apt.vehicle?.make} {apt.vehicle?.model})
+                          </span>
+                        </div>
+                      </div>
+                      {getStatusBadge(apt.status)}
+                    </div>
+
+                    <div className="text-xs text-slate-600 mb-2.5">
+                      <span className="font-semibold text-slate-700">{apt.serviceType}</span> • Requested for{' '}
+                      {formatDate(apt.preferredDate)} at {apt.preferredTime}
+                    </div>
+
+                    {/* Rejection Reason Notice */}
+                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 mb-4">
+                      <span className="font-bold block mb-0.5 text-rose-950">Workshop Reason:</span>
+                      <p className="italic">
+                        {apt.rejectionReason || 'The selected slot or technician was unavailable. Please select another date or time.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs">
+                    <button
+                      onClick={() => setTimelineAppointment(apt)}
+                      className="flex items-center gap-1 text-slate-600 hover:text-brand-600 font-medium transition-colors"
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      View Updates
+                    </button>
+
+                    <button
+                      onClick={() => handleRebook(apt)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-medium transition-colors shadow-sm"
+                    >
+                      <CalendarPlus className="w-3.5 h-3.5" />
+                      Request New Slot
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SECTION 3: APPOINTMENT HISTORY */}
+      {/* ========================================================================= */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {/* Section Header */}
+        <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-slate-200 text-slate-700 flex items-center justify-center">
+              <History className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                Appointment History
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-200 text-slate-700">
+                  {filteredHistory.length}
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500">
+                Completed, cancelled, and archived service appointments
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <span className="text-xs text-slate-500">Show:</span>
+            <select
+              value={historyItemsPerPage}
+              onChange={(e) => {
+                setHistoryItemsPerPage(Number(e.target.value));
+                setHistoryPage(1);
+              }}
+              className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 shadow-sm"
+            >
+              <option value={5}>5 per page</option>
+              <option value={10}>10 per page</option>
+              <option value={20}>20 per page</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Filters Toolbar */}
+        <div className="px-6 py-3.5 border-b border-slate-100 bg-white">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1 min-w-[220px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search appointments..."
-                value={searchQuery}
-                onChange={(e) => handleFilterChange('search', e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                placeholder="Search history by ID, vehicle, service, technician..."
+                value={historySearch}
+                onChange={(e) => {
+                  setHistorySearch(e.target.value);
+                  setHistoryPage(1);
+                }}
+                className="w-full pl-9 pr-3.5 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 bg-slate-50/50 focus:bg-white transition-colors"
               />
             </div>
 
             {/* Status Filter */}
             <select
-              value={statusFilter}
-              onChange={(e) => handleFilterChange('status', e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              value={historyStatusFilter}
+              onChange={(e) => {
+                setHistoryStatusFilter(e.target.value);
+                setHistoryPage(1);
+              }}
+              className="px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50/50 text-slate-700 font-medium"
             >
-              <option value="all">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="rescheduled">Rescheduled</option>
-              <option value="cancelled">Cancelled</option>
+              <option value="all">All Statuses</option>
               <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="rejected">Declined</option>
             </select>
 
             {/* Date Filter */}
             <select
-              value={dateFilter}
-              onChange={(e) => handleFilterChange('date', e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              value={historyDateFilter}
+              onChange={(e) => {
+                setHistoryDateFilter(e.target.value);
+                setHistoryPage(1);
+              }}
+              className="px-3 py-2 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 bg-slate-50/50 text-slate-700 font-medium"
             >
-              <option value="all">All Time</option>
+              <option value="all">All Dates</option>
               <option value="today">Today</option>
-              <option value="week">This Week</option>
+              <option value="week">Past 7 Days</option>
+              <option value="month">Past 30 Days</option>
             </select>
 
-            {/* Refresh Button */}
-            <button
-              onClick={() => {
-                setCurrentPage(1);
-                fetchAppointments();
-              }}
-              className="p-2 text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
-              title="Refresh"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+            {/* Reset Filters */}
+            {(historySearch || historyStatusFilter !== 'all' || historyDateFilter !== 'all') && (
+              <button
+                onClick={() => {
+                  setHistorySearch('');
+                  setHistoryStatusFilter('all');
+                  setHistoryDateFilter('all');
+                  setHistoryPage(1);
+                }}
+                className="px-3 py-2 text-xs text-brand-600 hover:text-brand-700 font-medium"
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
         </div>
 
-        {appointments.length === 0 ? (
-          <div className="p-8 text-center">
-            <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="text-sm text-slate-500">No appointments yet</p>
-            <button
-              onClick={() => setShowForm(true)}
-              className="mt-3 text-sm font-semibold text-brand-600 hover:text-brand-700"
-            >
-              Request your first appointment
-            </button>
+        {/* History Table */}
+        {filteredHistory.length === 0 ? (
+          <div className="p-12 text-center">
+            <History className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+            <h3 className="text-sm font-semibold text-slate-700">No appointment records found</h3>
+            <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+              There are no completed or cancelled appointments matching your current search and filters.
+            </p>
           </div>
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full text-left">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="text-left py-3 px-6 text-xs font-bold text-slate-500 uppercase">
-                      Appointment #
-                    </th>
-                    <th className="text-left py-3 px-6 text-xs font-bold text-slate-500 uppercase">
-                      Vehicle
-                    </th>
-                    <th className="text-left py-3 px-6 text-xs font-bold text-slate-500 uppercase">
-                      Service Type
-                    </th>
-                    <th className="text-left py-3 px-6 text-xs font-bold text-slate-500 uppercase">
-                      Preferred Date
-                    </th>
-                    <th className="text-left py-3 px-6 text-xs font-bold text-slate-500 uppercase">
-                      Scheduled Date
-                    </th>
-                    <th className="text-left py-3 px-6 text-xs font-bold text-slate-500 uppercase">
-                      Assigned Technician
-                    </th>
-                    <th className="text-left py-3 px-6 text-xs font-bold text-slate-500 uppercase">
-                      Status
-                    </th>
-                    <th className="text-left py-3 px-6 text-xs font-bold text-slate-500 uppercase">
-                      Status History
-                    </th>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="py-3.5 px-6">Appointment #</th>
+                    <th className="py-3.5 px-6">Vehicle</th>
+                    <th className="py-3.5 px-6">Service Type</th>
+                    <th className="py-3.5 px-6">Scheduled Date</th>
+                    <th className="py-3.5 px-6">Technician</th>
+                    <th className="py-3.5 px-6">Status</th>
+                    <th className="py-3.5 px-6 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {appointments.map((apt) => (
-                    <React.Fragment key={apt._id}>
-                    <tr className="border-b border-slate-100 hover:bg-slate-50">
-                      <td className="py-4 px-6 text-sm font-medium text-brand-600">
-                        {apt.appointmentNumber}
-                      </td>
-                      <td className="py-4 px-6 text-sm text-slate-600">
-                        {apt.vehicle?.registrationNumber || 'N/A'}
-                      </td>
-                      <td className="py-4 px-6 text-sm text-slate-600">
-                        {apt.serviceType}
-                      </td>
-                      <td className="py-4 px-6 text-sm text-slate-600">
-                        {formatDate(apt.preferredDate)}
-                      </td>
-                      <td className="py-4 px-6 text-sm text-slate-600">
-                        {apt.status === 'rescheduled' && apt.rescheduleDate 
-                          ? formatDate(apt.rescheduleDate) 
-                          : apt.status === 'approved' 
-                            ? formatDate(apt.preferredDate)
-                            : '—'}
-                      </td>
-                      <td className="py-4 px-6 text-sm text-slate-600">
-                        {(() => {
-                          const tech = apt.assignedTechnician;
-                          
-                          // First check if technician exists
-                          if (tech) {
-                            // Handle populated user data
-                            if (tech.user?.firstName) {
-                              return `${tech.user.firstName} ${tech.user.lastName?.charAt(0) || ''}.`;
-                            }
-                            
-                            // Handle direct employee data
-                            if (tech.firstName) {
-                              return `${tech.firstName} ${tech.lastName?.charAt(0) || ''}.`;
-                            }
-                            
-                            // Handle just the ID
-                            if (tech._id) {
-                              return 'Assigned';
-                            }
-                          }
-                          
-                          // Only show status messages if no technician is assigned
-                          if (apt.status === 'pending') {
-                            return 'Pending Assignment';
-                          } else if (apt.status === 'approved') {
-                            return 'To be Assigned';
-                          } else {
-                            return '—';
-                          }
-                        })()}
-                      </td>
-                      <td className="py-4 px-6">
-                        {getStatusBadge(apt.status)}
-                      </td>
-                      <td className="py-4 px-6">
-                        <button
-                          onClick={() => setExpandedAppointment(expandedAppointment === apt._id ? null : apt._id)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium transition-colors"
-                        >
-                          <Clock className="w-3 h-3" />
-                          {apt.statusHistory?.length || 0} Updates
-                          <ChevronRight className={`w-3 h-3 transition-transform ${expandedAppointment === apt._id ? 'rotate-90' : ''}`} />
-                        </button>
-                      </td>
-                    </tr>
-                    {expandedAppointment === apt._id && (
-                      <tr className="border-b border-slate-100 bg-slate-50/50">
-                        <td colSpan={8} className="py-4 px-6">
-                          <div className="space-y-3">
-                            <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                              Appointment Status Timeline
-                            </div>
-                            {apt.statusHistory && apt.statusHistory.length > 0 ? (
-                              <div className="space-y-2">
-                                {[...apt.statusHistory].sort((a, b) => new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime()).map((history, idx) => (
-                                  <div key={idx} className="flex items-start gap-3">
-                                    <div className="flex flex-col items-center">
-                                      <div className={`w-2.5 h-2.5 rounded-full mt-1.5 ${getStatusHistoryBadge(history.status).split(' ')[0]}`}></div>
-                                      {idx < (apt.statusHistory?.length || 0) - 1 && (
-                                        <div className="w-px h-full bg-slate-300"></div>
-                                      )}
-                                    </div>
-                                    <div className="flex-1 pb-3">
-                                      <div className="flex items-center gap-2">
-                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${getStatusHistoryBadge(history.status)}`}>
-                                          {history.status.charAt(0).toUpperCase() + history.status.slice(1)}
-                                        </span>
-                                        <span className="text-[10px] text-slate-400">
-                                          {new Date(history.changedAt).toLocaleString()}
-                                        </span>
-                                      </div>
-                                      {history.remarks && (
-                                        <div className="text-xs text-slate-600 mt-1">
-                                          {history.remarks}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="text-xs text-slate-400">
-                                No status history recorded yet. Current status: {apt.status}
-                              </div>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {paginatedHistory.map((apt) => {
+                    const scheduledDate =
+                      apt.status === 'rescheduled' && apt.rescheduleDate
+                        ? apt.rescheduleDate
+                        : apt.preferredDate;
+
+                    return (
+                      <tr key={apt._id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-4 px-6 font-mono font-medium text-brand-600 text-xs">
+                          {apt.appointmentNumber}
+                        </td>
+                        <td className="py-4 px-6">
+                          <div className="font-semibold text-slate-800 text-xs">
+                            {apt.vehicle?.registrationNumber || 'N/A'}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {apt.vehicle?.make} {apt.vehicle?.model}
+                          </div>
+                        </td>
+                        <td className="py-4 px-6 text-slate-700 text-xs font-medium">
+                          {apt.serviceType}
+                        </td>
+                        <td className="py-4 px-6 text-slate-600 text-xs">
+                          <div>{formatDate(scheduledDate)}</div>
+                          <div className="text-[11px] text-slate-400">{apt.preferredTime}</div>
+                        </td>
+                        <td className="py-4 px-6 text-slate-600 text-xs">
+                          {getTechnicianName(apt)}
+                        </td>
+                        <td className="py-4 px-6">
+                          {getStatusBadge(apt.status)}
+                        </td>
+                        <td className="py-4 px-6 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => setTimelineAppointment(apt)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+                              title="View timeline history"
+                            >
+                              <Clock className="w-3.5 h-3.5" />
+                              Updates
+                            </button>
+                            {apt.status === 'rejected' && (
+                              <button
+                                onClick={() => handleRebook(apt)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-brand-600 bg-brand-50 hover:bg-brand-100 transition-colors"
+                                title="Re-book this service"
+                              >
+                                <CalendarPlus className="w-3.5 h-3.5" />
+                                Re-book
+                              </button>
                             )}
                           </div>
                         </td>
                       </tr>
-                    )}
-                    </React.Fragment>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             {/* Pagination Controls */}
-            {totalPages > 1 && (
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50">
-              <div className="flex items-center justify-between">
-                <div className="text-sm text-slate-600">
-                  Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, totalItems)} of {totalItems} appointments
+            {historyTotalPages > 1 && (
+              <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="text-xs text-slate-500">
+                  Showing {(historyPage - 1) * historyItemsPerPage + 1} to{' '}
+                  {Math.min(historyPage * historyItemsPerPage, filteredHistory.length)} of{' '}
+                  {filteredHistory.length} history records
                 </div>
-                <div className="flex items-center gap-2">
+
+                <div className="flex items-center gap-1.5">
                   <button
-                    onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-sm font-medium transition-colors disabled:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed hover:bg-slate-50 flex items-center gap-1"
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                    disabled={historyPage === 1}
+                    className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
                   >
-                    <ChevronLeft className="w-4 h-4" />
-                    Previous
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    Prev
                   </button>
-                  
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
-                    // Show first page, last page, current page, and pages around current page
-                    const showPage = 
-                      page === 1 || 
-                      page === totalPages || 
-                      (page >= currentPage - 1 && page <= currentPage + 1);
-                    
-                    if (!showPage) {
-                      // Show ellipsis for hidden pages
-                      if (page === currentPage - 2 || page === currentPage + 2) {
-                        return <span key={page} className="px-2 text-slate-400">...</span>;
-                      }
-                      return null;
-                    }
-                    
-                    return (
-                      <button
-                        key={page}
-                        onClick={() => handlePageChange(page)}
-                        className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
-                          currentPage === page
-                            ? 'bg-brand-600 text-white'
-                            : 'bg-white border border-slate-200 hover:bg-slate-50 text-slate-700'
-                        }`}
-                      >
-                        {page}
-                      </button>
-                    );
-                  })}
-                  
+
+                  {Array.from({ length: historyTotalPages }, (_, i) => i + 1).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setHistoryPage(p)}
+                      className={`w-7 h-7 rounded-lg text-xs font-medium transition-colors ${
+                        historyPage === p
+                          ? 'bg-brand-600 text-white'
+                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+
                   <button
-                    onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage === totalPages}
-                    className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-sm font-medium transition-colors disabled:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed hover:bg-slate-50 flex items-center gap-1"
+                    onClick={() => setHistoryPage((p) => Math.min(historyTotalPages, p + 1))}
+                    disabled={historyPage === historyTotalPages}
+                    className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
                   >
                     Next
-                    <ChevronRight className="w-4 h-4" />
+                    <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
-            </div>
-          )}
+            )}
           </>
         )}
       </div>
+
+      {/* ========================================================================= */}
+      {/* TIMELINE / STATUS HISTORY MODAL */}
+      {/* ========================================================================= */}
+      {timelineAppointment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-mono font-bold text-brand-600">
+                  {timelineAppointment.appointmentNumber}
+                </span>
+                <h3 className="text-base font-bold text-slate-900 mt-0.5">Appointment Updates Timeline</h3>
+                <p className="text-xs text-slate-500">
+                  {timelineAppointment.vehicle?.registrationNumber} • {timelineAppointment.serviceType}
+                </p>
+              </div>
+              <button
+                onClick={() => setTimelineAppointment(null)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-200 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+                <span className="font-semibold text-slate-600">Current Status:</span>
+                {getStatusBadge(timelineAppointment.status)}
+              </div>
+
+              {timelineAppointment.rejectionReason && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900">
+                  <span className="font-bold block mb-1">Reason for Decline:</span>
+                  <p>{timelineAppointment.rejectionReason}</p>
+                </div>
+              )}
+
+              {timelineAppointment.statusHistory && timelineAppointment.statusHistory.length > 0 ? (
+                <div className="space-y-4 pt-2">
+                  {[...timelineAppointment.statusHistory]
+                    .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
+                    .map((item, idx) => (
+                      <div key={idx} className="flex items-start gap-3 text-xs">
+                        <div className="w-2.5 h-2.5 rounded-full bg-brand-500 mt-1.5 shrink-0 ring-4 ring-brand-100" />
+                        <div className="flex-1 bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="font-bold uppercase tracking-wider text-slate-800">
+                              {item.status}
+                            </span>
+                            <span className="text-[11px] text-slate-400">
+                              {new Date(item.changedAt).toLocaleString()}
+                            </span>
+                          </div>
+                          {item.remarks && (
+                            <p className="text-slate-600 mt-1">{item.remarks}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-slate-400 text-xs">
+                  No status updates recorded yet. Created on {formatDate(timelineAppointment.createdAt)}.
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 text-right">
+              <button
+                onClick={() => setTimelineAppointment(null)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-semibold transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* CANCEL APPOINTMENT CONFIRMATION MODAL */}
+      {/* ========================================================================= */}
+      {cancellingAppointment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
+            <div className="p-6">
+              <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 text-center">
+                Cancel Appointment {cancellingAppointment.appointmentNumber}?
+              </h3>
+              <p className="text-xs text-slate-500 text-center mt-1.5 leading-relaxed">
+                Are you sure you want to cancel this booking for your{' '}
+                <span className="font-semibold text-slate-700">
+                  {cancellingAppointment.vehicle?.registrationNumber}
+                </span>{' '}
+                ({cancellingAppointment.serviceType})? The reserved workshop slot will be released.
+              </p>
+
+              <div className="flex items-center justify-center gap-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setCancellingAppointment(null)}
+                  disabled={isCancelling}
+                  className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+                >
+                  Keep Appointment
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCancel}
+                  disabled={isCancelling}
+                  className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  {isCancelling ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Cancelling...
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="w-3.5 h-3.5" />
+                      Yes, Cancel
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
