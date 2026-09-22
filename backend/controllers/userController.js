@@ -1,6 +1,9 @@
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
 import Customer from '../models/Customer.js';
+import Vehicle from '../models/Vehicle.js';
+import JobCard from '../models/JobCard.js';
+import Invoice from '../models/Invoice.js';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 
@@ -204,6 +207,56 @@ export const getUsers = async (req, res) => {
       Employee.find({ user: { $in: userIds } }),
     ]);
 
+    const customerIds = customers.map((c) => c._id);
+    const vehicleMap = new Map();
+    const serviceMap = new Map();
+    const balanceMap = new Map();
+
+    if (customerIds.length > 0) {
+      const [vehicles, jobCards, invoices] = await Promise.all([
+        Vehicle.find({ customer: { $in: customerIds } }),
+        JobCard.find({ customer: { $in: customerIds } }).select('customer vehicle status'),
+        Invoice.find({ customer: { $in: customerIds } }).select('customer outstandingBalance paymentStatus'),
+      ]);
+
+      const vehicleServiceCount = new Map();
+      jobCards.forEach((jc) => {
+        if (jc.vehicle) {
+          const vId = jc.vehicle.toString();
+          vehicleServiceCount.set(vId, (vehicleServiceCount.get(vId) || 0) + 1);
+        }
+      });
+
+      vehicles.forEach((v) => {
+        const cId = v.customer.toString();
+        if (!vehicleMap.has(cId)) vehicleMap.set(cId, []);
+        const vObj = v.toObject();
+        vObj.serviceCount = vehicleServiceCount.get(v._id.toString()) || 0;
+        vehicleMap.get(cId).push(vObj);
+      });
+
+      jobCards.forEach((jc) => {
+        const cId = jc.customer.toString();
+        if (!serviceMap.has(cId)) {
+          serviceMap.set(cId, { total: 0, completed: 0, pending: 0 });
+        }
+        const s = serviceMap.get(cId);
+        s.total += 1;
+        if (['completed', 'delivered'].includes(jc.status?.toLowerCase())) {
+          s.completed += 1;
+        } else {
+          s.pending += 1;
+        }
+      });
+
+      invoices.forEach((inv) => {
+        const cId = inv.customer.toString();
+        if (inv.paymentStatus !== 'paid' && inv.outstandingBalance > 0) {
+          balanceMap.set(cId, (balanceMap.get(cId) || 0) + inv.outstandingBalance);
+        }
+      });
+    }
+
     const customerMap = new Map(customers.map((c) => [c.user.toString(), c]));
     const employeeMap = new Map(employees.map((e) => [e.user.toString(), e]));
 
@@ -213,13 +266,37 @@ export const getUsers = async (req, res) => {
 
       if (user.role === 'customer' && customerMap.has(strId)) {
         const cust = customerMap.get(strId).toObject();
+        const cIdStr = cust._id.toString();
+        const custVehicles = vehicleMap.get(cIdStr) || [];
+        const custServices = serviceMap.get(cIdStr) || { total: 0, completed: 0, pending: 0 };
+        const custBalance = balanceMap.get(cIdStr) || cust.outstandingBalance || 0;
+
+        cust.vehicles = custVehicles;
+        cust.totalServices = custServices.total;
+        cust.completedServices = custServices.completed;
+        cust.pendingServices = custServices.pending;
+        cust.outstandingBalance = custBalance;
+
         userObj.profile = cust;
         userObj.customerDetails = cust;
+        userObj.customerId = cust.customerId;
+        userObj.vehicles = custVehicles;
+        userObj.totalServices = custServices.total;
+        userObj.completedServices = custServices.completed;
+        userObj.pendingServices = custServices.pending;
+        userObj.outstandingBalance = custBalance;
       } else if ((user.role === 'employee' || user.role === 'manager' || user.role === 'administrator') && employeeMap.has(strId)) {
         const emp = employeeMap.get(strId).toObject();
         userObj.profile = emp;
         userObj.employeeDetails = emp;
+        userObj.employeeId = emp.employeeId;
+        userObj.managerId = emp.managerId;
       }
+
+      if (user.role === 'customer' && !userObj.customerId && user.username?.startsWith('CUST-')) {
+        userObj.customerId = user.username;
+      }
+
       return userObj;
     });
 
@@ -254,9 +331,73 @@ export const getUserById = async (req, res) => {
       });
     }
 
+    const userObj = user.toObject();
+    if (user.role === 'customer') {
+      const cust = await Customer.findOne({ user: user._id });
+      if (cust) {
+        const custObj = cust.toObject();
+        const [custVehicles, custJobCards, custInvoices] = await Promise.all([
+          Vehicle.find({ customer: cust._id }),
+          JobCard.find({ customer: cust._id }).select('customer vehicle status'),
+          Invoice.find({ customer: cust._id }).select('customer outstandingBalance paymentStatus'),
+        ]);
+
+        const vehicleServiceCount = new Map();
+        custJobCards.forEach((jc) => {
+          if (jc.vehicle) {
+            const vId = jc.vehicle.toString();
+            vehicleServiceCount.set(vId, (vehicleServiceCount.get(vId) || 0) + 1);
+          }
+        });
+
+        const enrichedVehicles = custVehicles.map((v) => {
+          const vObj = v.toObject();
+          vObj.serviceCount = vehicleServiceCount.get(v._id.toString()) || 0;
+          return vObj;
+        });
+
+        const totalServices = custJobCards.length;
+        const completedServices = custJobCards.filter((jc) =>
+          ['completed', 'delivered'].includes(jc.status?.toLowerCase())
+        ).length;
+        const pendingServices = totalServices - completedServices;
+
+        const outstandingBalance = custInvoices
+          .filter((inv) => inv.paymentStatus !== 'paid' && inv.outstandingBalance > 0)
+          .reduce((sum, inv) => sum + inv.outstandingBalance, 0);
+
+        custObj.vehicles = enrichedVehicles;
+        custObj.totalServices = totalServices;
+        custObj.completedServices = completedServices;
+        custObj.pendingServices = pendingServices;
+        custObj.outstandingBalance = outstandingBalance;
+
+        userObj.profile = custObj;
+        userObj.customerDetails = custObj;
+        userObj.customerId = custObj.customerId;
+        userObj.vehicles = enrichedVehicles;
+        userObj.totalServices = totalServices;
+        userObj.completedServices = completedServices;
+        userObj.pendingServices = pendingServices;
+        userObj.outstandingBalance = outstandingBalance;
+      }
+      if (!userObj.customerId && user.username?.startsWith('CUST-')) {
+        userObj.customerId = user.username;
+      }
+    } else if (user.role === 'employee' || user.role === 'manager' || user.role === 'administrator') {
+      const emp = await Employee.findOne({ user: user._id });
+      if (emp) {
+        const empObj = emp.toObject();
+        userObj.profile = empObj;
+        userObj.employeeDetails = empObj;
+        userObj.employeeId = empObj.employeeId;
+        userObj.managerId = empObj.managerId;
+      }
+    }
+
     res.json({
       success: true,
-      data: user,
+      data: userObj,
     });
   } catch (error) {
     res.status(500).json({

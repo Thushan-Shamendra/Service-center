@@ -20,8 +20,11 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
   if (!isOpen || !user) return null;
 
   const isManager = user.role === 'manager';
-  const userId = isManager ? (user as any).managerId || 'MGR-00001' : (user as any).employeeId || 'EMP-00001';
-  const profile = (user as any).profile || {};
+  const u = user as any;
+  const userId = isManager
+    ? u.managerId || u.profile?.managerId || u.employeeDetails?.managerId || u.employeeId || u.profile?.employeeId || (u._id ? `MGR-${u._id.slice(-4).toUpperCase()}` : 'MGR')
+    : u.employeeId || u.profile?.employeeId || u.employeeDetails?.employeeId || (u._id ? `EMP-${u._id.slice(-4).toUpperCase()}` : 'EMP');
+  const profile = (user as any).profile || (user as any).employeeDetails || {};
 
   const InfoRow = ({ icon: Icon, label, value }: { icon: any; label: string; value: string }) => (
     <div className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">

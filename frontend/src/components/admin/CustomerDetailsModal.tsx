@@ -18,11 +18,17 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
   if (!isOpen || !customer) return null;
 
   const customerData = customer as any;
-  const vehicles = customerData.vehicles || [];
-  const totalServices = customerData.totalServices || 0;
-  const completedServices = customerData.completedServices || 0;
-  const pendingServices = customerData.pendingServices || 0;
-  const outstandingBalance = customerData.outstandingBalance || 0;
+  const customerId =
+    customerData.customerId ||
+    customerData.profile?.customerId ||
+    customerData.customerDetails?.customerId ||
+    (customer.username?.startsWith('CUST-') ? customer.username : undefined) ||
+    (customerData._id ? `CUST-${customerData._id.slice(-4).toUpperCase()}` : 'CUST');
+  const vehicles = customerData.vehicles || customerData.profile?.vehicles || [];
+  const totalServices = customerData.totalServices || customerData.profile?.totalServices || 0;
+  const completedServices = customerData.completedServices || customerData.profile?.completedServices || 0;
+  const pendingServices = customerData.pendingServices || customerData.profile?.pendingServices || 0;
+  const outstandingBalance = customerData.outstandingBalance || customerData.profile?.outstandingBalance || 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
@@ -45,7 +51,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
             </div>
             <div className="flex-1">
               <h4 className="text-lg font-bold text-slate-900">{customer.fullName}</h4>
-              <p className="text-sm text-slate-600 font-mono">{customerData.customerId || 'CUS-00001'}</p>
+              <p className="text-sm text-slate-600 font-mono">{customerId}</p>
               <div className="mt-1">
                 <StatusBadge status={customer.isActive ? 'active' : 'inactive'} />
               </div>
@@ -62,7 +68,7 @@ export const CustomerDetailsModal: React.FC<CustomerDetailsModalProps> = ({
           <div className="grid grid-cols-2 gap-4 text-xs">
             <div>
               <span className="text-slate-500 block mb-1">Customer ID</span>
-              <span className="font-semibold text-slate-800 font-mono">{customerData.customerId || 'CUS-00001'}</span>
+              <span className="font-semibold text-slate-800 font-mono">{customerId}</span>
             </div>
             <div>
               <span className="text-slate-500 block mb-1">Name</span>

@@ -316,12 +316,53 @@ export const UsersPage: React.FC = () => {
     }
   }, [isEditModalOpen, selectedUser]);
 
-  const getUserID = (user: User): string => {
-    if (user.role === 'manager') return (user as any).managerId || 'MGR-00001';
-    if (user.role === 'employee') return (user as any).employeeId || 'EMP-00001';
-    if (user.role === 'customer') return (user as any).customerId || 'CUS-00001';
-    if (user.role === 'administrator') return (user as any).managerId || 'ADM-00001';
-    return 'USR-00001';
+  const getUserID = (user: User | null | undefined): string => {
+    if (!user) return '—';
+    const u = user as any;
+
+    if (user.role === 'manager') {
+      return (
+        u.managerId ||
+        u.profile?.managerId ||
+        u.employeeDetails?.managerId ||
+        u.employeeId ||
+        u.profile?.employeeId ||
+        u.employeeDetails?.employeeId ||
+        (u._id ? `MGR-${u._id.slice(-4).toUpperCase()}` : 'MGR')
+      );
+    }
+
+    if (user.role === 'employee') {
+      return (
+        u.employeeId ||
+        u.profile?.employeeId ||
+        u.employeeDetails?.employeeId ||
+        (u._id ? `EMP-${u._id.slice(-4).toUpperCase()}` : 'EMP')
+      );
+    }
+
+    if (user.role === 'customer') {
+      return (
+        u.customerId ||
+        u.profile?.customerId ||
+        u.customerDetails?.customerId ||
+        (u.username?.startsWith('CUST-') ? u.username : undefined) ||
+        (u._id ? `CUST-${u._id.slice(-4).toUpperCase()}` : 'CUST')
+      );
+    }
+
+    if (user.role === 'administrator') {
+      return (
+        u.managerId ||
+        u.profile?.managerId ||
+        u.employeeDetails?.managerId ||
+        u.employeeId ||
+        u.profile?.employeeId ||
+        (u.username === 'admin' ? 'ADM-00001' : (u._id ? `ADM-${u._id.slice(-4).toUpperCase()}` : 'ADM-00001'))
+      );
+    }
+
+    return u.employeeId || u.customerId || u.managerId || (u._id ? `USR-${u._id.slice(-4).toUpperCase()}` : 'USR');
   };
 
   const handleExportCSV = async () => {
@@ -450,7 +491,7 @@ export const UsersPage: React.FC = () => {
     {
       header: 'ID',
       accessor: (user) => (
-        <span className="text-xs font-bold text-slate-700 font-mono">{getUserID(user)}</span>
+        <span className="text-xs font-bold text-slate-700 font-mono whitespace-nowrap">{getUserID(user)}</span>
       ),
     },
     {
@@ -546,7 +587,7 @@ export const UsersPage: React.FC = () => {
     {
       header: 'ID',
       accessor: (user) => (
-        <span className="text-xs font-bold text-slate-700 font-mono">{getUserID(user)}</span>
+        <span className="text-xs font-bold text-slate-700 font-mono whitespace-nowrap">{getUserID(user)}</span>
       ),
     },
     {
@@ -642,7 +683,7 @@ export const UsersPage: React.FC = () => {
     {
       header: 'Customer ID',
       accessor: (user) => (
-        <span className="text-xs font-bold text-slate-700 font-mono">{getUserID(user)}</span>
+        <span className="text-xs font-bold text-slate-700 font-mono whitespace-nowrap">{getUserID(user)}</span>
       ),
     },
     {
@@ -672,19 +713,25 @@ export const UsersPage: React.FC = () => {
     {
       header: 'Vehicles',
       accessor: (user) => (
-        <span className="text-xs text-slate-600 font-bold">{(user as any).vehicles?.length || 0}</span>
+        <span className="text-xs text-slate-600 font-bold">
+          {(user as any).vehicles?.length ?? (user as any).profile?.vehicles?.length ?? 0}
+        </span>
       ),
     },
     {
       header: 'Services',
       accessor: (user) => (
-        <span className="text-xs text-slate-600 font-bold">{(user as any).totalServices || 0}</span>
+        <span className="text-xs text-slate-600 font-bold">
+          {(user as any).totalServices ?? (user as any).profile?.totalServices ?? 0}
+        </span>
       ),
     },
     {
       header: 'Balance',
       accessor: (user) => (
-        <span className="text-xs text-slate-600 font-bold">{formatLKR((user as any).outstandingBalance || 0)}</span>
+        <span className="text-xs text-slate-600 font-bold">
+          {formatLKR((user as any).outstandingBalance ?? (user as any).profile?.outstandingBalance ?? 0)}
+        </span>
       ),
     },
     {
@@ -749,7 +796,7 @@ export const UsersPage: React.FC = () => {
     {
       header: 'User ID',
       accessor: (user) => (
-        <span className="text-xs font-bold text-slate-700 font-mono">{getUserID(user)}</span>
+        <span className="text-xs font-bold text-slate-700 font-mono whitespace-nowrap">{getUserID(user)}</span>
       ),
     },
     {
