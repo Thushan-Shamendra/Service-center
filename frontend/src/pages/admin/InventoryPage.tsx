@@ -331,9 +331,13 @@ export const InventoryPage: React.FC = () => {
         : adjustForm.reason;
         
       const apiForm = {
-        type: (adjustForm.type === 'increase' ? 'addition' : 'deduction') as 'addition' | 'deduction' | 'adjustment',
+        type: (adjustForm.type === 'increase' ? 'in' : 'out') as 'in' | 'out',
         quantity: adjustForm.quantity,
         reason: remarks,
+        remarks: remarks,
+        reference: adjustForm.reason === 'Other'
+          ? (adjustForm.reasonDetails ? `Other: ${adjustForm.reasonDetails}` : 'Other')
+          : adjustForm.reason,
       };
       
       const res = await inventoryApi.adjustStock(adjustForm.itemId, apiForm);
@@ -349,6 +353,7 @@ export const InventoryPage: React.FC = () => {
         });
         fetchInventory();
         fetchInventorySummary();
+        fetchMovementHistory();
       }
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Stock adjustment failed');
@@ -1786,9 +1791,16 @@ export const InventoryPage: React.FC = () => {
                         <td className={`p-3 font-bold ${movement.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>
                           {movement.type === 'in' ? '+' : '-'}{movement.quantity} {movement.unit}
                         </td>
-                        <td className="p-3 text-slate-600">{movement.reference}</td>
                         <td className="p-3 text-slate-600">
-                          {movement.performedBy?.name || 'System'} 
+                          <div className="font-medium text-slate-800">{movement.reference || 'Stock Adjustment'}</div>
+                          {movement.remarks && movement.remarks !== movement.reference && (
+                            <div className="text-[11px] text-slate-400 truncate max-w-xs">{movement.remarks}</div>
+                          )}
+                        </td>
+                        <td className="p-3 text-slate-600">
+                          <span className="font-medium text-slate-800">
+                            {movement.performedBy?.fullName || movement.performedBy?.name || 'System'}
+                          </span>
                           {movement.performedBy?.role && (
                             <span className="text-[10px] text-slate-400 ml-1">({movement.performedBy.role})</span>
                           )}

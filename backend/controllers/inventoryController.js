@@ -129,23 +129,34 @@ export const updateInventoryItem = async (req, res) => {
 
 export const adjustStock = async (req, res) => {
   try {
-    const { type, quantity, remarks, reference } = req.body;
+    const { type, quantity, remarks, reference, reason } = req.body;
     
     const qty = parseInt(quantity);
     if (isNaN(qty) || qty <= 0) {
       return res.status(400).json({ success: false, message: 'Quantity must be a positive number' });
     }
 
+    let normalizedType = type;
+    if (type === 'in' || type === 'addition' || type === 'increase') {
+      normalizedType = 'in';
+    } else if (type === 'out' || type === 'deduction' || type === 'decrease') {
+      normalizedType = 'out';
+    } else if (type === 'adjustment') {
+      normalizedType = 'adjustment';
+    } else {
+      return res.status(400).json({ success: false, message: 'Invalid adjustment type' });
+    }
+
     let updatedItem;
     
-    if (type === 'in') {
+    if (normalizedType === 'in') {
       // Atomically increment stock
       updatedItem = await InventoryItem.findByIdAndUpdate(
         req.params.id,
         { $inc: { quantity: qty } },
         { new: true }
       );
-    } else if (type === 'out') {
+    } else if (normalizedType === 'out') {
       // Atomically decrement stock with condition check to prevent negative stock
       updatedItem = await InventoryItem.findOneAndUpdate(
         { _id: req.params.id, quantity: { $gte: qty } },
@@ -165,15 +176,13 @@ export const adjustStock = async (req, res) => {
           message: `Insufficient stock! Current available stock: ${itemExists.quantity} ${itemExists.unit}`,
         });
       }
-    } else if (type === 'adjustment') {
+    } else if (normalizedType === 'adjustment') {
       // Atomically set stock to specific quantity
       updatedItem = await InventoryItem.findByIdAndUpdate(
         req.params.id,
         { $set: { quantity: qty } },
         { new: true }
       );
-    } else {
-      return res.status(400).json({ success: false, message: 'Invalid adjustment type' });
     }
 
     if (!updatedItem) {
@@ -181,16 +190,19 @@ export const adjustStock = async (req, res) => {
     }
 
     // Add movement history (separate atomic operation)
+    const finalRemarks = remarks || reason || '';
+    const defaultRef = normalizedType === 'in' ? 'Stock Addition' : normalizedType === 'out' ? 'Stock Deduction' : 'Stock Adjustment';
+
     await InventoryItem.findByIdAndUpdate(
       req.params.id,
       {
         $push: {
           movementHistory: {
-            type,
+            type: normalizedType,
             quantity: qty,
-            reference: reference || 'Stock Adjustment',
-            remarks,
-            performedBy: req.user._id,
+            reference: reference || defaultRef,
+            remarks: finalRemarks,
+            performedBy: req.user?._id,
             date: new Date(),
           }
         }
@@ -258,9 +270,13 @@ export const getMovementHistory = async (req, res) => {
     // Flatten movement history from all items
     const movements = [];
     let movementCounter = 1;
-
     items.forEach(item => {
       item.movementHistory.forEach(movement => {
+        const perf = movement.performedBy;
+        const performedByName = perf
+          ? (perf.fullName || `${perf.firstName || ''} ${perf.lastName || ''}`.trim() || perf.username || 'System')
+          : 'System';
+
         movements.push({
           movementId: `MOV-${String(movementCounter).padStart(5, '0')}`,
           itemId: item._id,
@@ -271,7 +287,12 @@ export const getMovementHistory = async (req, res) => {
           quantity: movement.quantity,
           reference: movement.reference,
           remarks: movement.remarks,
-          performedBy: movement.performedBy,
+          performedBy: perf ? {
+            _id: perf._id,
+            name: performedByName,
+            fullName: performedByName,
+            role: perf.role || 'Staff',
+          } : { name: 'System', fullName: 'System', role: 'System' },
           date: movement.date,
         });
         movementCounter++;

@@ -61,7 +61,16 @@ export const inventoryApi = {
     return response.data;
   },
 
-  adjustStock: async (id: string, data: { quantity: number; reason: string; type: 'addition' | 'deduction' | 'adjustment' }) => {
+  adjustStock: async (
+    id: string,
+    data: {
+      quantity: number;
+      type: 'in' | 'out' | 'adjustment' | 'addition' | 'deduction' | 'increase' | 'decrease';
+      reason?: string;
+      remarks?: string;
+      reference?: string;
+    }
+  ) => {
     const response = await api.post(`/inventory/${id}/adjust`, data);
     return response.data;
   },
