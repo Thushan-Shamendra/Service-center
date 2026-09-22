@@ -81,6 +81,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           { label: 'Final Inspection', path: '/employee/final-inspection', icon: CheckCircle2 },
           { label: 'Attendance', path: '/employee/attendance', icon: Clock },
           { label: 'Leave Management', path: '/employee/leave-management', icon: Calendar },
+          { label: 'Advances & Loans', path: '/employee/advances', icon: DollarSign },
           { label: 'Profile', path: '/employee/profile', icon: User },
         ];
 

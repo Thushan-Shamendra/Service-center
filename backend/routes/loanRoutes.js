@@ -16,7 +16,7 @@ const router = express.Router();
 router.use(protect);
 
 // Loan routes
-router.route('/loans').get(getLoans).post(authorize('administrator', 'manager'), createLoan);
+router.route('/loans').get(getLoans).post(authorize('administrator', 'manager', 'employee'), createLoan);
 router.get('/loans/stats', getLoanStats);
 router.get('/loans/:id', getLoanById);
 router.put('/loans/:id/status', authorize('administrator', 'manager'), updateLoanStatus);

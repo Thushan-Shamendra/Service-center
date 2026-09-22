@@ -247,7 +247,7 @@ export const hrApi = {
     );
   },
 
-  createSalaryAdvance: async (data: { employeeId: string; requestedAmount: number; reason: string }) => {
+  createSalaryAdvance: async (data: { employeeId?: string; requestedAmount: number; reason: string }) => {
     return apiWithRetry(
       () => api.post('/hr/salary-advances', data),
       'createSalaryAdvance'
@@ -300,7 +300,7 @@ export const hrApi = {
     );
   },
 
-  createLoan: async (data: { employeeId: string; loanAmount: number; interestRate: number; installments: number; status?: string }) => {
+  createLoan: async (data: { employeeId?: string; loanAmount: number; interestRate?: number; installments: number; status?: string }) => {
     return apiWithRetry(
       () => api.post('/hr/loans', data),
       'createLoan'

@@ -11,23 +11,38 @@ export const getLoans = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const query = {};
-    if (req.query.employee) query.employee = req.query.employee;
-    if (req.query.status) query.status = req.query.status;
-    if (req.query.staffType) {
-      const employee = await Employee.findOne({ 
-        $or: [
-          { employeeId: req.query.staffType },
-          { managerId: req.query.staffType }
-        ]
-      });
-      if (employee) query.employee = employee._id;
+
+    // If user is an employee, only return their own loans
+    if (req.user.role === 'employee') {
+      const currentEmployee = await Employee.findOne({ user: req.user._id });
+      if (!currentEmployee) {
+        return res.status(200).json({
+          success: true,
+          data: [],
+          pagination: { page: 1, limit, total: 0, pages: 0 },
+        });
+      }
+      query.employee = currentEmployee._id;
+    } else {
+      if (req.query.employee) query.employee = req.query.employee;
+      if (req.query.staffType) {
+        const employee = await Employee.findOne({ 
+          $or: [
+            { employeeId: req.query.staffType },
+            { managerId: req.query.staffType }
+          ]
+        });
+        if (employee) query.employee = employee._id;
+      }
     }
+
+    if (req.query.status) query.status = req.query.status;
 
     const [loans, total] = await Promise.all([
       Loan.find(query)
         .populate({ 
           path: 'employee', 
-          populate: { path: 'user', select: 'firstName lastName' } 
+          populate: { path: 'user', select: 'firstName lastName email mobile' } 
         })
         .populate('approvedBy', 'firstName lastName')
         .sort({ createdAt: -1 })
@@ -82,26 +97,46 @@ export const createLoan = async (req, res) => {
       status 
     } = req.body;
 
-    console.log('Creating loan with data:', { employeeId, loanAmount, interestRate, installments, status });
+    let targetEmployeeId = employeeId;
+
+    // If user is an employee, auto-detect their own employee profile
+    if (req.user.role === 'employee') {
+      const emp = await Employee.findOne({ user: req.user._id });
+      if (!emp) {
+        return res.status(404).json({ success: false, message: 'Employee profile not found' });
+      }
+      targetEmployeeId = emp._id;
+
+      // Check if employee already has a pending loan request
+      const existingPending = await Loan.findOne({
+        employee: emp._id,
+        status: 'pending',
+      });
+      if (existingPending) {
+        return res.status(400).json({
+          success: false,
+          message: `You already have a loan application (${existingPending.loanId}) pending approval.`,
+        });
+      }
+    }
 
     // Validate employee ID
-    if (!employeeId) {
+    if (!targetEmployeeId) {
       return res.status(400).json({ success: false, message: 'Employee ID is required' });
     }
 
     // Validate employee
-    const employee = await Employee.findById(employeeId).populate('user');
+    const employee = await Employee.findById(targetEmployeeId).populate('user');
     if (!employee) {
-      console.log('Employee not found with ID:', employeeId);
       return res.status(404).json({ success: false, message: 'Employee not found' });
     }
 
     const currentSalary = employee.basicSalary || 50000;
-    const staffId = employee.employeeId || employee.managerId;
+    const staffId = employee.employeeId || employee.managerId || 'EMP';
 
     // Check for existing active loans
     const existingActiveLoan = await Loan.findOne({
-      employee: employeeId,
+      employee: targetEmployeeId,
       status: { $in: ['active', 'approved'] }
     });
 
@@ -114,59 +149,62 @@ export const createLoan = async (req, res) => {
       });
     }
 
+    const parsedLoanAmount = Number(loanAmount);
+    const parsedInstallments = parseInt(installments);
+    // Standard interest rate: 10%
+    const rate = req.user.role === 'employee' ? 10 : (interestRate !== undefined && interestRate !== null ? Number(interestRate) : 10);
+
     // Validate inputs
-    if (!loanAmount || loanAmount <= 0) {
+    if (!parsedLoanAmount || parsedLoanAmount <= 0) {
       return res.status(400).json({ success: false, message: 'Loan amount must be greater than 0' });
     }
 
-    if (!interestRate || interestRate < 0) {
+    if (rate < 0) {
       return res.status(400).json({ success: false, message: 'Interest rate cannot be negative' });
     }
 
-    if (!installments || installments <= 0) {
+    if (!parsedInstallments || parsedInstallments <= 0) {
       return res.status(400).json({ success: false, message: 'Installments must be greater than 0' });
     }
 
-    const interestAmount = Math.round(loanAmount * (interestRate / 100));
-    const totalRepayable = loanAmount + interestAmount;
-    const monthlyDeduction = Math.round(totalRepayable / installments);
+    const interestAmount = Math.round(parsedLoanAmount * (rate / 100));
+    const totalRepayable = parsedLoanAmount + interestAmount;
+    const monthlyDeduction = Math.round(totalRepayable / parsedInstallments);
 
     // Generate loan ID using atomic counter
     const loanCount = await Counter.increment('loan');
     const loanId = `LN-${String(loanCount).padStart(5, '0')}`;
 
-    console.log('Creating loan document with ID:', loanId);
+    const loanStatus = req.user.role === 'employee' ? 'pending' : (status || 'pending');
 
     const loan = await Loan.create({
       loanId,
-      employee: employeeId,
+      employee: targetEmployeeId,
       staffId,
       currentSalary,
-      loanAmount,
-      interestRate,
+      loanAmount: parsedLoanAmount,
+      interestRate: rate,
       interestAmount,
       totalRepayable,
-      installments,
+      installments: parsedInstallments,
       monthlyDeduction,
       paidAmount: 0,
       outstandingBalance: totalRepayable,
-      status: status || 'pending',
+      status: loanStatus,
     });
-
-    console.log('Loan created successfully:', loan.loanId);
 
     const populatedLoan = await Loan.findById(loan._id)
       .populate({ 
         path: 'employee', 
-        populate: { path: 'user', select: 'firstName lastName' } 
+        populate: { path: 'user', select: 'firstName lastName email' } 
       });
 
-    res.status(201).json({ success: true, data: populatedLoan, message: 'Loan created successfully' });
+    res.status(201).json({ success: true, data: populatedLoan, message: 'Loan application submitted successfully' });
   } catch (error) {
-    console.error('Error creating loan:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 // @desc    Update loan status
 // @route   PUT /api/hr/loans/:id/status
@@ -214,22 +252,32 @@ export const updateLoanStatus = async (req, res) => {
 // @route   GET /api/hr/loans/stats
 export const getLoanStats = async (req, res) => {
   try {
-    const activeLoans = await Loan.countDocuments({ status: 'active' });
-    const pendingLoans = await Loan.countDocuments({ status: 'pending' });
-    const completedLoans = await Loan.countDocuments({ status: 'completed' });
+    const filter = {};
+    if (req.user.role === 'employee') {
+      const employee = await Employee.findOne({ user: req.user._id });
+      if (employee) {
+        filter.employee = employee._id;
+      }
+    }
+
+    const activeLoans = await Loan.countDocuments({ ...filter, status: 'active' });
+    const pendingLoans = await Loan.countDocuments({ ...filter, status: 'pending' });
+    const completedLoans = await Loan.countDocuments({ ...filter, status: 'completed' });
     
+    const matchFilter = { status: 'active' };
+    if (filter.employee) {
+      matchFilter.employee = filter.employee;
+    }
+
     const outstandingResult = await Loan.aggregate([
-      { $match: { status: 'active' } },
+      { $match: matchFilter },
       { $group: { _id: null, total: { $sum: '$outstandingBalance' } } }
     ]);
     const totalOutstanding = outstandingResult[0]?.total || 0;
 
     // Calculate this month's repayments
-    const currentMonth = new Date().getMonth() + 1;
-    const currentYear = new Date().getFullYear();
-    
     const monthlyRepayments = await Loan.aggregate([
-      { $match: { status: 'active' } },
+      { $match: matchFilter },
       { $project: { monthlyDeduction: 1 } },
       { $group: { _id: null, total: { $sum: '$monthlyDeduction' } } }
     ]);

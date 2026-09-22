@@ -15,7 +15,7 @@ const router = express.Router();
 router.use(protect);
 
 // Salary advance routes
-router.route('/salary-advances').get(getSalaryAdvances).post(authorize('administrator', 'manager'), createSalaryAdvance);
+router.route('/salary-advances').get(getSalaryAdvances).post(authorize('administrator', 'manager', 'employee'), createSalaryAdvance);
 router.get('/salary-advances/stats', getAdvanceStats);
 router.get('/salary-advances/:id', getSalaryAdvanceById);
 router.put('/salary-advances/:id/status', authorize('administrator', 'manager'), updateAdvanceStatus);

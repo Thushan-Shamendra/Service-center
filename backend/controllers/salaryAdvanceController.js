@@ -12,7 +12,22 @@ export const getSalaryAdvances = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const query = {};
-    if (req.query.employee) query.employee = req.query.employee;
+
+    // If user is an employee, only return their own salary advances
+    if (req.user.role === 'employee') {
+      const currentEmployee = await Employee.findOne({ user: req.user._id });
+      if (!currentEmployee) {
+        return res.status(200).json({
+          success: true,
+          data: [],
+          pagination: { page: 1, limit, total: 0, pages: 0 },
+        });
+      }
+      query.employee = currentEmployee._id;
+    } else {
+      if (req.query.employee) query.employee = req.query.employee;
+    }
+
     if (req.query.status) query.status = req.query.status;
     if (req.query.startDate && req.query.endDate) {
       query.requestedDate = {
@@ -25,7 +40,7 @@ export const getSalaryAdvances = async (req, res) => {
       SalaryAdvance.find(query)
         .populate({ 
           path: 'employee', 
-          populate: { path: 'user', select: 'firstName lastName' } 
+          populate: { path: 'user', select: 'firstName lastName email mobile' } 
         })
         .populate('approvedBy', 'firstName lastName')
         .sort({ requestedDate: -1 })
@@ -74,17 +89,37 @@ export const createSalaryAdvance = async (req, res) => {
   try {
     const { employeeId, requestedAmount, reason } = req.body;
 
-    console.log('Creating salary advance with data:', { employeeId, requestedAmount, reason });
+    let targetEmployeeId = employeeId;
+
+    // If user is an employee, auto-detect their own employee profile
+    if (req.user.role === 'employee') {
+      const emp = await Employee.findOne({ user: req.user._id });
+      if (!emp) {
+        return res.status(404).json({ success: false, message: 'Employee profile not found' });
+      }
+      targetEmployeeId = emp._id;
+
+      // Check for existing pending request
+      const existingPending = await SalaryAdvance.findOne({
+        employee: emp._id,
+        status: 'pending',
+      });
+      if (existingPending) {
+        return res.status(400).json({
+          success: false,
+          message: `You already have a pending salary advance request (${existingPending.advanceId}) under review.`,
+        });
+      }
+    }
 
     // Validate employee ID
-    if (!employeeId) {
+    if (!targetEmployeeId) {
       return res.status(400).json({ success: false, message: 'Employee ID is required' });
     }
 
     // Validate employee
-    const employee = await Employee.findById(employeeId).populate('user');
+    const employee = await Employee.findById(targetEmployeeId).populate('user');
     if (!employee) {
-      console.log('Employee not found with ID:', employeeId);
       return res.status(404).json({ success: false, message: 'Employee not found' });
     }
 
@@ -98,8 +133,6 @@ export const createSalaryAdvance = async (req, res) => {
     // Calculate maximum allowed advance
     const maxByPercentage = (currentSalary * maxAdvancePercentage) / 100;
     const maxAllowed = Math.min(maxByPercentage, maxAdvanceAmount);
-
-    console.log('Salary advance validation:', { currentSalary, maxAllowed, requestedAmount });
 
     // Validate requested amount
     if (requestedAmount > maxAllowed) {
@@ -119,15 +152,13 @@ export const createSalaryAdvance = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Reason is required' });
     }
 
-    console.log('Creating salary advance document...');
-    
     // Generate advance ID using atomic counter
     const advanceCount = await Counter.increment('salaryAdvance');
     const advanceId = `ADV-${String(advanceCount).padStart(5, '0')}`;
     
     const advance = await SalaryAdvance.create({
       advanceId,
-      employee: employeeId,
+      employee: targetEmployeeId,
       currentSalary,
       requestedAmount,
       reason,
@@ -135,25 +166,18 @@ export const createSalaryAdvance = async (req, res) => {
       requestedDate: new Date(),
     });
 
-    console.log('Salary advance created successfully:', advance.advanceId);
-
     const populatedAdvance = await SalaryAdvance.findById(advance._id)
       .populate({ 
         path: 'employee', 
-        populate: { path: 'user', select: 'firstName lastName' } 
+        populate: { path: 'user', select: 'firstName lastName email' } 
       });
 
-    res.status(201).json({ success: true, data: populatedAdvance, message: 'Salary advance request created' });
+    res.status(201).json({ success: true, data: populatedAdvance, message: 'Salary advance request submitted successfully' });
   } catch (error) {
-    console.error('Error creating salary advance:', error);
-    console.error('Error details:', {
-      message: error.message,
-      name: error.name,
-      stack: error.stack
-    });
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 // @desc    Update salary advance status (approve/reject)
 // @route   PUT /api/hr/salary-advances/:id/status
@@ -203,10 +227,18 @@ export const updateAdvanceStatus = async (req, res) => {
 // @route   GET /api/hr/salary-advances/stats
 export const getAdvanceStats = async (req, res) => {
   try {
-    const total = await SalaryAdvance.countDocuments();
-    const pending = await SalaryAdvance.countDocuments({ status: 'pending' });
-    const approved = await SalaryAdvance.countDocuments({ status: 'approved' });
-    const rejected = await SalaryAdvance.countDocuments({ status: 'rejected' });
+    const filter = {};
+    if (req.user.role === 'employee') {
+      const employee = await Employee.findOne({ user: req.user._id });
+      if (employee) {
+        filter.employee = employee._id;
+      }
+    }
+
+    const total = await SalaryAdvance.countDocuments(filter);
+    const pending = await SalaryAdvance.countDocuments({ ...filter, status: 'pending' });
+    const approved = await SalaryAdvance.countDocuments({ ...filter, status: 'approved' });
+    const rejected = await SalaryAdvance.countDocuments({ ...filter, status: 'rejected' });
 
     const stats = {
       total,

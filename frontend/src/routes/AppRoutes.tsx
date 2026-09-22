@@ -118,6 +118,7 @@ import { ApplyLeavePage } from '../pages/employee/ApplyLeavePage';
 import { LeaveRequestDetailPage } from '../pages/employee/LeaveRequestDetailPage';
 import { LeaveHistoryPage } from '../pages/employee/LeaveHistoryPage';
 import { EmployeeAttendancePage } from '../pages/employee/EmployeeAttendancePage';
+import { EmployeeAdvancesPage } from '../pages/employee/EmployeeAdvancesPage';
 
 // Customer Pages
 import { CustomerAppointmentsPage } from '../pages/customer/CustomerAppointmentsPage';
@@ -573,6 +574,22 @@ export const AppRoutes: React.FC = () => {
         element={
           <ProtectedRoute allowedRoles={['employee']}>
             <LeaveHistoryPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/employee/advances"
+        element={
+          <ProtectedRoute allowedRoles={['employee']}>
+            <EmployeeAdvancesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/employee/loans"
+        element={
+          <ProtectedRoute allowedRoles={['employee']}>
+            <EmployeeAdvancesPage />
           </ProtectedRoute>
         }
       />
