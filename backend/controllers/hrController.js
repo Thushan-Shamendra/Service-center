@@ -168,10 +168,17 @@ export const checkIn = async (req, res) => {
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
-    const existing = await Attendance.findOne({
+    let existing = await Attendance.findOne({
       employee: employee._id,
       date: { $gte: startOfDay, $lte: endOfDay },
     });
+    if (!existing) {
+      // Also check by checkIn timestamp today
+      existing = await Attendance.findOne({
+        employee: employee._id,
+        checkIn: { $gte: startOfDay, $lte: endOfDay },
+      });
+    }
     if (existing && existing.checkIn) {
       return res.status(400).json({ success: false, message: 'Already checked in today' });
     }
@@ -212,10 +219,19 @@ export const checkOut = async (req, res) => {
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
-    const record = await Attendance.findOne({
+    let record = await Attendance.findOne({
       employee: employee._id,
       date: { $gte: startOfDay, $lte: endOfDay },
     });
+
+    // Fallback: look for an unclosed check-in from the last 24 hours
+    if (!record) {
+      record = await Attendance.findOne({
+        employee: employee._id,
+        checkIn: { $ne: null, $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        checkOut: null,
+      }).sort({ date: -1 });
+    }
 
     if (!record || !record.checkIn) {
       return res.status(400).json({ success: false, message: 'You have not checked in today' });

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { hrApi } from '../../api/hrApi';
 import toast from 'react-hot-toast';
+import dayjs from 'dayjs';
 import {
   ArrowLeft,
   Clock,
@@ -35,6 +36,70 @@ interface AttendanceRecord {
   lateReason?: string;
   remarks?: string;
 }
+
+// Helper to robustly determine if an attendance record belongs to today
+const isTodayRecord = (record: AttendanceRecord): boolean => {
+  const now = new Date();
+  const todayYear = now.getFullYear();
+  const todayMonth = now.getMonth();
+  const todayDate = now.getDate();
+
+  const isSameDayLocal = (dateInput: string | Date | undefined): boolean => {
+    if (!dateInput) return false;
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return false;
+    return (
+      d.getFullYear() === todayYear &&
+      d.getMonth() === todayMonth &&
+      d.getDate() === todayDate
+    );
+  };
+
+  // 1. Check checkIn timestamp in local time
+  if (isSameDayLocal(record.checkIn)) {
+    return true;
+  }
+
+  // 2. Check record date in local time
+  if (isSameDayLocal(record.date)) {
+    return true;
+  }
+
+  // 3. Compare using dayjs formatted strings
+  try {
+    const todayFormatted = dayjs().format('YYYY-MM-DD');
+    if (record.checkIn && dayjs(record.checkIn).format('YYYY-MM-DD') === todayFormatted) return true;
+    if (record.date && dayjs(record.date).format('YYYY-MM-DD') === todayFormatted) return true;
+  } catch {
+    // Ignore dayjs parse error
+  }
+
+  // 4. Check UTC date matching in case stored as UTC midnight without timezone offset
+  try {
+    const utcToday = now.toISOString().split('T')[0];
+    if (record.date && new Date(record.date).toISOString().split('T')[0] === utcToday) {
+      return true;
+    }
+    if (record.checkIn && new Date(record.checkIn).toISOString().split('T')[0] === utcToday) {
+      return true;
+    }
+  } catch {
+    // Ignore
+  }
+
+  // 5. Open shift check: if employee checked in within the last 24 hours and has not checked out yet
+  if (record.checkIn && !record.checkOut) {
+    const checkInMs = new Date(record.checkIn).getTime();
+    if (!isNaN(checkInMs)) {
+      const elapsedHours = (now.getTime() - checkInMs) / (1000 * 60 * 60);
+      if (elapsedHours >= 0 && elapsedHours < 24) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
 
 export const EmployeeAttendancePage: React.FC = () => {
   const navigate = useNavigate();
@@ -69,18 +134,13 @@ export const EmployeeAttendancePage: React.FC = () => {
   const fetchAttendance = useCallback(async (silent = false) => {
     if (!silent) setIsRefreshing(true);
     try {
-      const res = await hrApi.getAttendance();
+      const res = await hrApi.getAttendance({ limit: 100 });
       if (res.data?.success || res.success || Array.isArray(res.data)) {
         const records: AttendanceRecord[] = res.data?.data || res.data || [];
         setAttendanceList(records);
 
         // Find today's record
-        const todayStr = new Date().toISOString().split('T')[0];
-        const foundToday = records.find((r) => {
-          if (!r.date) return false;
-          const recDateStr = new Date(r.date).toISOString().split('T')[0];
-          return recDateStr === todayStr;
-        });
+        const foundToday = records.find(isTodayRecord);
         setTodayRecord(foundToday || null);
       }
     } catch (error) {
@@ -103,6 +163,10 @@ export const EmployeeAttendancePage: React.FC = () => {
       const res = await hrApi.checkIn();
       if (res.data?.success || res.success) {
         toast.success(res.data?.message || res.message || 'Checked in successfully!');
+        const newRec = res.data?.data || res.data;
+        if (newRec && typeof newRec === 'object' && (newRec.checkIn || newRec.date)) {
+          setTodayRecord(newRec);
+        }
         await fetchAttendance(true);
       } else {
         toast.error(res.data?.message || res.message || 'Check-in failed');
@@ -121,6 +185,10 @@ export const EmployeeAttendancePage: React.FC = () => {
       const res = await hrApi.checkOut();
       if (res.data?.success || res.success) {
         toast.success(res.data?.message || res.message || 'Checked out successfully! Shift logged.');
+        const updatedRec = res.data?.data || res.data;
+        if (updatedRec && typeof updatedRec === 'object' && (updatedRec.checkOut || updatedRec.checkIn)) {
+          setTodayRecord(updatedRec);
+        }
         await fetchAttendance(true);
       } else {
         toast.error(res.data?.message || res.message || 'Check-out failed');
@@ -267,6 +335,16 @@ export const EmployeeAttendancePage: React.FC = () => {
   const hasCheckedIn = !!todayRecord?.checkIn;
   const hasCheckedOut = !!todayRecord?.checkOut;
 
+  // Real-time calculation of active shift hours
+  const currentShiftHours = useMemo(() => {
+    if (!todayRecord?.checkIn || hasCheckedOut) return '0';
+    const checkInTime = new Date(todayRecord.checkIn).getTime();
+    if (isNaN(checkInTime)) return '0';
+    const diffMs = Math.max(0, currentTime.getTime() - checkInTime);
+    const diffHrs = diffMs / (1000 * 60 * 60);
+    return diffHrs < 0.1 ? '< 0.1' : diffHrs.toFixed(1);
+  }, [todayRecord?.checkIn, hasCheckedOut, currentTime]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -342,10 +420,17 @@ export const EmployeeAttendancePage: React.FC = () => {
                   Not Checked In
                 </span>
               ) : !hasCheckedOut ? (
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  Currently Checked In (On Shift)
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                    Currently Checked In (On Shift)
+                  </span>
+                  {todayRecord?.status === 'late' && (
+                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      Late Arrival
+                    </span>
+                  )}
+                </div>
               ) : (
                 <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
@@ -372,7 +457,7 @@ export const EmployeeAttendancePage: React.FC = () => {
             <div className="col-span-2 sm:col-span-1">
               <span className="text-slate-400 block uppercase tracking-wider text-[10px] font-semibold">Hours Today</span>
               <span className="text-base sm:text-lg font-bold text-brand-300 font-mono mt-0.5 block">
-                {todayRecord?.hoursWorked ? `${todayRecord.hoursWorked} hrs` : hasCheckedIn && !hasCheckedOut ? 'Counting...' : '0 hrs'}
+                {todayRecord?.hoursWorked ? `${todayRecord.hoursWorked} hrs` : hasCheckedIn && !hasCheckedOut ? `${currentShiftHours} hrs` : '0 hrs'}
               </span>
             </div>
           </div>

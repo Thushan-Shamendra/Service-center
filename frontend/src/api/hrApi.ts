@@ -72,7 +72,7 @@ const createRequestController = (key: string): AbortController => {
 };
 
 export const hrApi = {
-  getAttendance: async (params?: { employee?: string; date?: string; startDate?: string; endDate?: string; status?: string }) => {
+  getAttendance: async (params?: { employee?: string; date?: string; startDate?: string; endDate?: string; status?: string; limit?: number; page?: number }) => {
     const key = generateRequestKey('/hr/attendance', params);
     const controller = createRequestController(key);
     
