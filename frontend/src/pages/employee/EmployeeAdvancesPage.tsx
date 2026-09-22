@@ -114,16 +114,33 @@ export const EmployeeAdvancesPage: React.FC = () => {
   const fetchAdvancesData = async () => {
     setIsLoadingAdvances(true);
     try {
-      const [advancesRes, statsRes] = await Promise.all([
+      const [advancesRes, statsRes] = await Promise.allSettled([
         hrApi.getSalaryAdvances(advanceStatusFilter ? { status: advanceStatusFilter } : {}),
         hrApi.getAdvanceStats(),
       ]);
 
-      if (advancesRes.success) setAdvances(advancesRes.data);
-      if (statsRes.success) setAdvanceStats(statsRes.data);
+      if (advancesRes.status === 'fulfilled' && advancesRes.value?.success) {
+        setAdvances(advancesRes.value.data || []);
+      } else if (advancesRes.status === 'rejected') {
+        const err = advancesRes.reason;
+        if (err?.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED' && !err?.message?.includes('cancel')) {
+          console.error('Failed to load salary advances:', err);
+        }
+      }
+
+      if (statsRes.status === 'fulfilled' && statsRes.value?.success) {
+        setAdvanceStats(statsRes.value.data || null);
+      } else if (statsRes.status === 'rejected') {
+        const err = statsRes.reason;
+        if (err?.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED' && !err?.message?.includes('cancel')) {
+          console.error('Failed to load advance stats:', err);
+        }
+      }
     } catch (error: any) {
+      if (error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED' || error?.message?.includes('cancel')) {
+        return;
+      }
       console.error('Failed to load salary advances:', error);
-      toast.error('Failed to load salary advances');
     } finally {
       setIsLoadingAdvances(false);
     }
@@ -133,16 +150,33 @@ export const EmployeeAdvancesPage: React.FC = () => {
   const fetchLoansData = async () => {
     setIsLoadingLoans(true);
     try {
-      const [loansRes, statsRes] = await Promise.all([
+      const [loansRes, statsRes] = await Promise.allSettled([
         hrApi.getLoans(loanStatusFilter ? { status: loanStatusFilter } : {}),
         hrApi.getLoanStats(),
       ]);
 
-      if (loansRes.success) setLoans(loansRes.data);
-      if (statsRes.success) setLoanStats(statsRes.data);
+      if (loansRes.status === 'fulfilled' && loansRes.value?.success) {
+        setLoans(loansRes.value.data || []);
+      } else if (loansRes.status === 'rejected') {
+        const err = loansRes.reason;
+        if (err?.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED' && !err?.message?.includes('cancel')) {
+          console.error('Failed to load loans:', err);
+        }
+      }
+
+      if (statsRes.status === 'fulfilled' && statsRes.value?.success) {
+        setLoanStats(statsRes.value.data || null);
+      } else if (statsRes.status === 'rejected') {
+        const err = statsRes.reason;
+        if (err?.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED' && !err?.message?.includes('cancel')) {
+          console.error('Failed to load loan stats:', err);
+        }
+      }
     } catch (error: any) {
+      if (error?.name === 'CanceledError' || error?.code === 'ERR_CANCELED' || error?.message?.includes('cancel')) {
+        return;
+      }
       console.error('Failed to load loans:', error);
-      toast.error('Failed to load loans');
     } finally {
       setIsLoadingLoans(false);
     }
@@ -169,7 +203,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
 
     if (amount > maxAdvanceAllowed) {
       setAdvanceError(
-        `Requested amount exceeds maximum advance limit of LKR ${formatLKR(maxAdvanceAllowed)} (30% of basic salary).`
+        `Requested amount exceeds maximum advance limit of ${formatLKR(maxAdvanceAllowed)} (30% of basic salary).`
       );
       return;
     }
@@ -295,10 +329,10 @@ export const EmployeeAdvancesPage: React.FC = () => {
           <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-4 shrink-0 text-right">
             <p className="text-xs text-blue-200 font-medium">Basic Monthly Salary</p>
             <p className="text-2xl font-black text-white mt-0.5">
-              LKR {formatLKR(basicSalary)}
+              {formatLKR(basicSalary)}
             </p>
             <p className="text-[11px] text-blue-300 mt-1">
-              Max Advance Limit (30%): <span className="font-bold text-white">LKR {formatLKR(maxAdvanceAllowed)}</span>
+              Max Advance Limit (30%): <span className="font-bold text-white">{formatLKR(maxAdvanceAllowed)}</span>
             </p>
           </div>
         </div>
@@ -505,7 +539,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
                             })}
                           </td>
                           <td className="p-4 font-bold text-slate-900 text-sm">
-                            LKR {formatLKR(adv.requestedAmount)}
+                            {formatLKR(adv.requestedAmount)}
                           </td>
                           <td className="p-4 text-slate-700 max-w-xs truncate" title={adv.reason}>
                             {adv.reason}
@@ -565,7 +599,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
                 </div>
               </div>
               <p className="text-2xl font-black text-amber-600">
-                LKR {formatLKR(loanStats?.totalOutstanding || 0)}
+                {formatLKR(loanStats?.totalOutstanding || 0)}
               </p>
               <p className="text-xs text-slate-500 mt-1">Remaining balance to repay</p>
             </div>
@@ -589,7 +623,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
                 </div>
               </div>
               <p className="text-2xl font-black text-purple-600">
-                LKR {formatLKR(loanStats?.monthlyRepayments || 0)}
+                {formatLKR(loanStats?.monthlyRepayments || 0)}
               </p>
               <p className="text-xs text-slate-500 mt-1">Scheduled monthly payroll deduction</p>
             </div>
@@ -719,20 +753,20 @@ export const EmployeeAdvancesPage: React.FC = () => {
                         <tr key={loan._id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="p-4 font-mono font-bold text-slate-900">{loan.loanId}</td>
                           <td className="p-4 font-bold text-slate-900 text-sm">
-                            LKR {formatLKR(loan.loanAmount)}
+                            {formatLKR(loan.loanAmount)}
                             <div className="text-[10px] text-slate-400 font-normal">
-                              Total: LKR {formatLKR(loan.totalRepayable)} (10% int.)
+                              Total: {formatLKR(loan.totalRepayable)} (10% int.)
                             </div>
                           </td>
                           <td className="p-4 text-slate-600 font-medium">
                             {loan.installments} Months
                           </td>
                           <td className="p-4 font-bold text-slate-900">
-                            LKR {formatLKR(loan.monthlyDeduction)} / mo
+                            {formatLKR(loan.monthlyDeduction)} / mo
                           </td>
                           <td className="p-4 min-w-[160px]">
                             <div className="flex items-center justify-between text-[11px] mb-1 font-semibold">
-                              <span className="text-slate-600">Paid: LKR {formatLKR(loan.paidAmount || 0)}</span>
+                              <span className="text-slate-600">Paid: {formatLKR(loan.paidAmount || 0)}</span>
                               <span className="text-slate-500">{paidPct}%</span>
                             </div>
                             <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
@@ -742,7 +776,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
                               />
                             </div>
                             <div className="text-[10px] text-slate-400 mt-1">
-                              Bal: LKR {formatLKR(loan.outstandingBalance)}
+                              Bal: {formatLKR(loan.outstandingBalance)}
                             </div>
                           </td>
                           <td className="p-4">
@@ -808,11 +842,11 @@ export const EmployeeAdvancesPage: React.FC = () => {
               <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
                 <div className="flex justify-between text-xs">
                   <span className="text-slate-500">Current Basic Salary:</span>
-                  <span className="font-bold text-slate-800">LKR {formatLKR(basicSalary)}</span>
+                  <span className="font-bold text-slate-800">{formatLKR(basicSalary)}</span>
                 </div>
                 <div className="flex justify-between text-xs">
                   <span className="text-slate-500">Max Permitted Advance (30%):</span>
-                  <span className="font-bold text-emerald-700">LKR {formatLKR(maxAdvanceAllowed)}</span>
+                  <span className="font-bold text-emerald-700">{formatLKR(maxAdvanceAllowed)}</span>
                 </div>
               </div>
 
@@ -840,7 +874,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
                   />
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Maximum permitted request: LKR {formatLKR(maxAdvanceAllowed)}
+                  Maximum permitted request: {formatLKR(maxAdvanceAllowed)}
                 </p>
               </div>
 
@@ -926,7 +960,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
               {/* Basic Salary Badge */}
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex justify-between items-center text-xs">
                 <span className="text-slate-500">Your Current Basic Salary:</span>
-                <span className="font-bold text-slate-900">LKR {formatLKR(basicSalary)}</span>
+                <span className="font-bold text-slate-900">{formatLKR(basicSalary)}</span>
               </div>
 
               {/* Loan Amount */}
@@ -983,15 +1017,15 @@ export const EmployeeAdvancesPage: React.FC = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Total Interest Amount:</span>
-                    <span className="font-bold text-slate-900">LKR {formatLKR(calcInterestAmount)}</span>
+                    <span className="font-bold text-slate-900">{formatLKR(calcInterestAmount)}</span>
                   </div>
                   <div className="flex justify-between border-t border-brand-200/50 pt-1.5">
                     <span className="text-slate-700 font-semibold">Total Amount Repayable:</span>
-                    <span className="font-black text-brand-900">LKR {formatLKR(calcTotalRepayable)}</span>
+                    <span className="font-black text-brand-900">{formatLKR(calcTotalRepayable)}</span>
                   </div>
                   <div className="flex justify-between border-t border-brand-200/50 pt-1.5 text-sm">
                     <span className="text-brand-800 font-extrabold">Estimated Monthly Deduction:</span>
-                    <span className="font-black text-brand-600">LKR {formatLKR(calcMonthlyDeduction)} / mo</span>
+                    <span className="font-black text-brand-600">{formatLKR(calcMonthlyDeduction)} / mo</span>
                   </div>
                 </div>
               )}
@@ -1055,25 +1089,25 @@ export const EmployeeAdvancesPage: React.FC = () => {
               <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
                 <p className="text-[11px] text-slate-500">Principal</p>
                 <p className="text-sm font-black text-slate-900 mt-0.5">
-                  LKR {formatLKR(selectedLoan.loanAmount)}
+                  {formatLKR(selectedLoan.loanAmount)}
                 </p>
               </div>
               <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
                 <p className="text-[11px] text-slate-500">Total Repayable</p>
                 <p className="text-sm font-black text-slate-900 mt-0.5">
-                  LKR {formatLKR(selectedLoan.totalRepayable)}
+                  {formatLKR(selectedLoan.totalRepayable)}
                 </p>
               </div>
               <div className="bg-emerald-50 p-3.5 rounded-xl border border-emerald-100">
                 <p className="text-[11px] text-emerald-700">Total Paid</p>
                 <p className="text-sm font-black text-emerald-800 mt-0.5">
-                  LKR {formatLKR(selectedLoan.paidAmount || 0)}
+                  {formatLKR(selectedLoan.paidAmount || 0)}
                 </p>
               </div>
               <div className="bg-amber-50 p-3.5 rounded-xl border border-amber-100">
                 <p className="text-[11px] text-amber-700">Outstanding</p>
                 <p className="text-sm font-black text-amber-800 mt-0.5">
-                  LKR {formatLKR(selectedLoan.outstandingBalance)}
+                  {formatLKR(selectedLoan.outstandingBalance)}
                 </p>
               </div>
             </div>
@@ -1097,7 +1131,7 @@ export const EmployeeAdvancesPage: React.FC = () => {
               <div className="flex justify-between py-2 border-b border-slate-100">
                 <span className="text-slate-500">Monthly Deduction:</span>
                 <span className="font-bold text-slate-800">
-                  LKR {formatLKR(selectedLoan.monthlyDeduction)} / month
+                  {formatLKR(selectedLoan.monthlyDeduction)} / month
                 </span>
               </div>
               <div className="flex justify-between py-2 border-b border-slate-100">
@@ -1133,9 +1167,9 @@ export const EmployeeAdvancesPage: React.FC = () => {
                         </p>
                       </div>
                       <div className="text-right">
-                        <p className="font-bold text-emerald-600">+LKR {formatLKR(rep.amount)}</p>
+                        <p className="font-bold text-emerald-600">+{formatLKR(rep.amount)}</p>
                         <p className="text-[10px] text-slate-400">
-                          Bal: LKR {formatLKR(rep.balanceAfterPayment)}
+                          Bal: {formatLKR(rep.balanceAfterPayment)}
                         </p>
                       </div>
                     </div>
