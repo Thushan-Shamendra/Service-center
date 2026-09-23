@@ -12,7 +12,6 @@ import {
   AlertTriangle, 
   XCircle, 
   Search, 
-  CreditCard,
   Receipt,
   Printer,
   Mail,
@@ -356,7 +355,7 @@ export const CustomerInvoicesPage: React.FC = () => {
                   onClick={() => handlePayNow(selectedInvoice || filteredInvoices[0])}
                   className="w-full mt-3 bg-white text-orange-600 font-extrabold py-2.5 rounded-xl hover:bg-orange-50 transition-colors flex items-center justify-center gap-2 shadow-md text-sm"
                 >
-                  <CreditCard className="w-4 h-4" />
+                  <Banknote className="w-4 h-4" />
                   Pay Now
                 </button>
               </div>
@@ -541,7 +540,7 @@ export const CustomerInvoicesPage: React.FC = () => {
                     onClick={() => handlePayNow(selectedInvoice)}
                     className="flex items-center gap-2 px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold text-sm shadow-md transition-all mr-auto"
                   >
-                    <CreditCard className="w-4 h-4" />
+                    <Banknote className="w-4 h-4" />
                     Pay Now
                   </button>
                 )}
