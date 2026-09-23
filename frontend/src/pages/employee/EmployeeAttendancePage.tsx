@@ -143,7 +143,16 @@ export const EmployeeAttendancePage: React.FC = () => {
         const foundToday = records.find(isTodayRecord);
         setTodayRecord(foundToday || null);
       }
-    } catch (error) {
+    } catch (error: any) {
+      if (
+        error?.name === 'CanceledError' ||
+        error?.code === 'ERR_CANCELED' ||
+        error?.message?.includes('canceled') ||
+        error?.message?.includes('cancel') ||
+        error?.message?.includes('aborted')
+      ) {
+        return;
+      }
       console.error('Failed to fetch attendance:', error);
       toast.error('Failed to load attendance records');
     } finally {
@@ -172,6 +181,15 @@ export const EmployeeAttendancePage: React.FC = () => {
         toast.error(res.data?.message || res.message || 'Check-in failed');
       }
     } catch (error: any) {
+      if (
+        error?.name === 'CanceledError' ||
+        error?.code === 'ERR_CANCELED' ||
+        error?.message?.includes('canceled') ||
+        error?.message?.includes('cancel') ||
+        error?.message?.includes('aborted')
+      ) {
+        return;
+      }
       toast.error(error.response?.data?.message || 'Check-in failed');
     } finally {
       setIsProcessingAction(false);
@@ -194,6 +212,15 @@ export const EmployeeAttendancePage: React.FC = () => {
         toast.error(res.data?.message || res.message || 'Check-out failed');
       }
     } catch (error: any) {
+      if (
+        error?.name === 'CanceledError' ||
+        error?.code === 'ERR_CANCELED' ||
+        error?.message?.includes('canceled') ||
+        error?.message?.includes('cancel') ||
+        error?.message?.includes('aborted')
+      ) {
+        return;
+      }
       toast.error(error.response?.data?.message || 'Check-out failed');
     } finally {
       setIsProcessingAction(false);

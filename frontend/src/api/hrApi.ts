@@ -72,12 +72,9 @@ const createRequestController = (key: string): AbortController => {
 };
 
 export const hrApi = {
-  getAttendance: async (params?: { employee?: string; self?: boolean | string; date?: string; startDate?: string; endDate?: string; status?: string; limit?: number; page?: number }) => {
-    const key = generateRequestKey('/hr/attendance', params);
-    const controller = createRequestController(key);
-    
+  getAttendance: async (params?: { employee?: string; self?: boolean | string; date?: string; startDate?: string; endDate?: string; status?: string; limit?: number; page?: number; signal?: AbortSignal }) => {
     return apiWithRetry(
-      () => api.get('/hr/attendance', { params, signal: controller.signal }),
+      () => api.get('/hr/attendance', { params, signal: params?.signal }),
       'getAttendance'
     );
   },
@@ -110,12 +107,9 @@ export const hrApi = {
     );
   },
 
-  getPayroll: async (params?: { month?: number; year?: number }) => {
-    const key = generateRequestKey('/hr/payroll', params);
-    const controller = createRequestController(key);
-    
+  getPayroll: async (params?: { month?: number; year?: number; signal?: AbortSignal }) => {
     return apiWithRetry(
-      () => api.get('/hr/payroll', { params, signal: controller.signal }),
+      () => api.get('/hr/payroll', { params, signal: params?.signal }),
       'getPayroll'
     );
   },
@@ -184,12 +178,9 @@ export const hrApi = {
   },
 
   // Leave API functions
-  getLeaveRequests: async (params?: { employee?: string; status?: string; leaveType?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) => {
-    const key = generateRequestKey('/hr/leave', params);
-    const controller = createRequestController(key);
-    
+  getLeaveRequests: async (params?: { employee?: string; status?: string; leaveType?: string; startDate?: string; endDate?: string; page?: number; limit?: number; signal?: AbortSignal }) => {
     return apiWithRetry(
-      () => api.get('/hr/leave', { params, signal: controller.signal }),
+      () => api.get('/hr/leave', { params, signal: params?.signal }),
       'getLeaveRequests'
     );
   },
@@ -230,12 +221,9 @@ export const hrApi = {
   },
 
   // Salary Advance API functions
-  getSalaryAdvances: async (params?: { employee?: string; self?: boolean | string; status?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) => {
-    const key = generateRequestKey('/hr/salary-advances', params);
-    const controller = createRequestController(key);
-    
+  getSalaryAdvances: async (params?: { employee?: string; self?: boolean | string; status?: string; startDate?: string; endDate?: string; page?: number; limit?: number; signal?: AbortSignal }) => {
     return apiWithRetry(
-      () => api.get('/hr/salary-advances', { params, signal: controller.signal }),
+      () => api.get('/hr/salary-advances', { params, signal: params?.signal }),
       'getSalaryAdvances'
     );
   },
@@ -283,12 +271,9 @@ export const hrApi = {
   },
 
   // Loan API functions
-  getLoans: async (params?: { employee?: string; self?: boolean | string; status?: string; staffType?: string; page?: number; limit?: number }) => {
-    const key = generateRequestKey('/hr/loans', params);
-    const controller = createRequestController(key);
-    
+  getLoans: async (params?: { employee?: string; self?: boolean | string; status?: string; staffType?: string; page?: number; limit?: number; signal?: AbortSignal }) => {
     return apiWithRetry(
-      () => api.get('/hr/loans', { params, signal: controller.signal }),
+      () => api.get('/hr/loans', { params, signal: params?.signal }),
       'getLoans'
     );
   },

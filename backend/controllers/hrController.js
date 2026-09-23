@@ -20,7 +20,20 @@ export const getAttendance = async (req, res) => {
     const query = {};
     if (req.user.role === 'employee' || req.query.self === 'true' || req.query.self === true) {
       const emp = await Employee.findOne({ user: req.user._id });
-      if (emp) query.employee = emp._id;
+      if (emp) {
+        query.employee = emp._id;
+      } else {
+        return res.status(200).json({
+          success: true,
+          data: [],
+          pagination: {
+            page,
+            limit,
+            total: 0,
+            pages: 0,
+          },
+        });
+      }
     } else if (req.query.employee) {
       query.employee = req.query.employee;
     }
