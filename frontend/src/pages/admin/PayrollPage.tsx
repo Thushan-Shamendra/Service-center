@@ -186,12 +186,13 @@ export const PayrollPage: React.FC = () => {
     try {
       const res = await hrApi.bulkCalculatePayroll({ month, year, includeOvertime });
       if (res.success) {
-        fetchPayroll();
-        alert(`Payroll calculated for ${res.data.length} employees`);
+        await fetchPayroll();
+        await handleCalculatePreview();
+        alert(res.message || `Payroll records generated for ${res.data?.length || 0} employees`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to calculate payroll:', error);
-      alert('Failed to calculate payroll');
+      alert(error.response?.data?.message || 'Failed to generate monthly payroll');
     } finally {
       setIsCalculating(false);
     }
@@ -756,12 +757,12 @@ export const PayrollPage: React.FC = () => {
 
         <div className="flex gap-3">
           <button
-            onClick={handleCalculatePreview}
+            onClick={handleBulkCalculate}
             disabled={isCalculating}
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-bold shadow-md shadow-blue-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Calculator className="w-4 h-4" />
-            {isCalculating ? 'Calculating...' : 'Generate Monthly Payroll'}
+            {isCalculating ? 'Generating...' : 'Generate Monthly Payroll'}
           </button>
           <button
             onClick={handleBulkProcess}

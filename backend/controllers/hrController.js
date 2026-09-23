@@ -822,30 +822,37 @@ export const calculatePayrollPreview = async (req, res) => {
 export const bulkCalculatePayroll = async (req, res) => {
   try {
     const { month, year, includeOvertime } = req.body;
-    const employees = await Employee.find({ status: 'active' });
+    const targetMonth = parseInt(month);
+    const targetYear = parseInt(year);
+
+    if (isNaN(targetMonth) || isNaN(targetYear)) {
+      return res.status(400).json({ success: false, message: 'Valid month and year are required' });
+    }
+
+    const employees = await Employee.find({
+      status: { $ne: 'inactive', $ne: 'terminated' },
+    });
     const settings = await PayrollSettings.findOne({ active: true }) || {};
 
-    console.log(`Processing payroll for ${employees.length} employees for month ${month}, year ${year}`);
-
     const calculatedPayrolls = [];
-    let payrollCount = await Counter.increment('payroll');
 
     for (const emp of employees) {
       const basic = emp.basicSalary || 50000;
       const allowances = emp.allowances || 0;
       
       // Calculate overtime from attendance
+      let totalOvertimeHours = 0;
       let overtimePay = 0;
-      if (includeOvertime) {
-        const startDate = new Date(year, month - 1, 1);
-        const endDate = new Date(year, month, 0);
+      if (includeOvertime !== false) {
+        const startDate = new Date(targetYear, targetMonth - 1, 1, 0, 0, 0, 0);
+        const endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
         
         const attendanceRecords = await Attendance.find({
           employee: emp._id,
           date: { $gte: startDate, $lte: endDate },
         });
 
-        const totalOvertimeHours = attendanceRecords.reduce((sum, record) => sum + (record.overtimeHours || 0), 0);
+        totalOvertimeHours = attendanceRecords.reduce((sum, record) => sum + (record.overtimeHours || 0), 0);
         const overtimeRateMultiplier = settings.overtimeRateMultiplier || 1.5;
         const standardHours = settings.standardWorkingHours || 160;
         const overtimeRate = (basic / standardHours) * overtimeRateMultiplier;
@@ -885,23 +892,29 @@ export const bulkCalculatePayroll = async (req, res) => {
       const totalDeductions = epfEmployee + loanDeductions + salaryAdvanceDeductions + otherDeductions;
       const netSalary = grossSalary - totalDeductions;
 
-      // Generate payroll ID for new records
-      const existingPayroll = await Payroll.findOne({ employee: emp._id, month, year });
+      // Check existing payroll record
+      const existingPayroll = await Payroll.findOne({ employee: emp._id, month: targetMonth, year: targetYear });
+      if (existingPayroll && existingPayroll.status === 'processed') {
+        // Do not overwrite already processed payrolls
+        calculatedPayrolls.push(existingPayroll);
+        continue;
+      }
+
       let payrollId;
       if (!existingPayroll) {
-        payrollId = `PAY-${String(payrollCount).padStart(5, '0')}`;
-        payrollCount++; // Increment for next employee
+        const seq = await Counter.increment('payroll');
+        payrollId = `PAY-${String(seq).padStart(5, '0')}`;
       } else {
         payrollId = existingPayroll.payrollId;
       }
 
-      // Ensure payrollId is always set for new records
       const updateData = {
         employee: emp._id,
-        month,
-        year,
+        month: targetMonth,
+        year: targetYear,
         basicSalary: basic,
         allowances,
+        overtimeHours: totalOvertimeHours,
         overtimePay,
         grossSalary,
         epfEmployee,
@@ -912,30 +925,26 @@ export const bulkCalculatePayroll = async (req, res) => {
         salaryAdvanceDeductions,
         totalDeductions,
         netSalary,
-        status: 'calculated',
+        status: existingPayroll ? existingPayroll.status : 'draft',
       };
       
-      // Only set payrollId if it's a new record (pre-save hook won't run with findOneAndUpdate)
       if (!existingPayroll) {
         updateData.payrollId = payrollId;
       }
 
       const payroll = await Payroll.findOneAndUpdate(
-        { employee: emp._id, month, year },
+        { employee: emp._id, month: targetMonth, year: targetYear },
         updateData,
-        { upsert: true, new: true }
+        { upsert: true, new: true, setDefaultsOnInsert: true }
       );
 
       calculatedPayrolls.push(payroll);
-      console.log(`Created payroll for employee ${emp._id}`);
     }
-
-    console.log(`Total payrolls created: ${calculatedPayrolls.length}`);
 
     res.status(200).json({
       success: true,
       data: calculatedPayrolls,
-      message: `Payroll calculated for ${employees.length} employees (${month}/${year})`
+      message: `Payroll records created/updated for ${calculatedPayrolls.length} employees (${targetMonth}/${targetYear})`
     });
   } catch (error) {
     console.error('Bulk calculate error:', error);
@@ -948,9 +957,11 @@ export const bulkCalculatePayroll = async (req, res) => {
 export const bulkProcessPayroll = async (req, res) => {
   try {
     const { month, year } = req.body;
+    const targetMonth = parseInt(month);
+    const targetYear = parseInt(year);
     
     const result = await Payroll.updateMany(
-      { month, year, status: 'calculated' },
+      { month: targetMonth, year: targetYear, status: { $in: ['calculated', 'draft'] } },
       { status: 'processed', paymentDate: new Date() }
     );
 
