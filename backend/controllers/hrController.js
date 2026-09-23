@@ -1087,22 +1087,53 @@ export const bulkProcessPayroll = async (req, res) => {
 export const getHRStats = async (req, res) => {
   try {
     const totalEmployees = await Employee.countDocuments({ status: 'active' });
+    
+    // Proper date range query for today's attendance (handling timezones and late/half-day statuses)
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    
     const presentToday = await Attendance.countDocuments({
-      date: new Date().setHours(0, 0, 0, 0),
-      status: 'present',
+      date: { 
+        $gte: new Date(startOfDay.getTime() - 14 * 3600 * 1000), 
+        $lte: new Date(endOfDay.getTime() + 14 * 3600 * 1000) 
+      },
+      status: { $in: ['present', 'late', 'half_day', 'half-day'] },
     });
     
-    const currentMonth = new Date().getMonth() + 1;
-    const currentYear = new Date().getFullYear();
+    let targetMonth = req.query.month ? parseInt(req.query.month) : (now.getMonth() + 1);
+    let targetYear = req.query.year ? parseInt(req.query.year) : now.getFullYear();
+
+    // If month not specified in query, and targetMonth has 0 records, fallback to latest month with records
+    if (!req.query.month) {
+      const currentMonthCount = await Payroll.countDocuments({ month: targetMonth, year: targetYear });
+      if (currentMonthCount === 0) {
+        const latestPayroll = await Payroll.findOne({}).sort({ year: -1, month: -1 });
+        if (latestPayroll) {
+          targetMonth = latestPayroll.month;
+          targetYear = latestPayroll.year;
+        }
+      }
+    }
     
     const monthlyPayroll = await Payroll.aggregate([
-      { $match: { month: currentMonth, year: currentYear } },
+      { $match: { month: targetMonth, year: targetYear } },
       {
         $group: {
           _id: null,
           totalGross: { $sum: '$grossSalary' },
           totalNet: { $sum: '$netSalary' },
-          processedCount: { $sum: 1 },
+          totalCount: { $sum: 1 },
+          processedCount: {
+            $sum: {
+              $cond: [{ $in: ['$status', ['processed', 'paid']] }, 1, 0]
+            }
+          },
+          draftCount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'draft'] }, 1, 0]
+            }
+          }
         },
       },
     ]);
@@ -1126,8 +1157,11 @@ export const getHRStats = async (req, res) => {
       presentToday,
       pendingLeave,
       pendingAdvances,
+      pendingLoans,
       activeLoans,
-      monthlyPayroll: monthlyPayroll[0] || { totalGross: 0, totalNet: 0, processedCount: 0 },
+      payrollMonth: targetMonth,
+      payrollYear: targetYear,
+      monthlyPayroll: monthlyPayroll[0] || { totalGross: 0, totalNet: 0, processedCount: 0, totalCount: 0, draftCount: 0 },
     };
 
     res.status(200).json({ success: true, data: stats });

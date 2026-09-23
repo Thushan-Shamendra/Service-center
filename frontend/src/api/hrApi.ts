@@ -176,9 +176,9 @@ export const hrApi = {
     );
   },
 
-  getHRStats: async () => {
+  getHRStats: async (params?: { month?: number; year?: number }) => {
     return apiWithRetry(
-      () => api.get('/hr/stats'),
+      () => api.get('/hr/stats', { params }),
       'getHRStats'
     );
   },

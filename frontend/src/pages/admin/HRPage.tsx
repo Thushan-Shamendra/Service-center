@@ -22,7 +22,8 @@ import {
   XCircle,
   FileText,
   Eye,
-  Edit
+  Edit,
+  RefreshCw
 } from 'lucide-react';
 import { SalaryAdvancePage } from './SalaryAdvancePage';
 import { LoanPage } from './LoanPage';
@@ -30,16 +31,26 @@ import { PayrollPage } from './PayrollPage';
 
 type HRSubTab = 'overview' | 'attendance' | 'leave' | 'payroll' | 'advances' | 'loans';
 
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
 interface HRStats {
   totalEmployees: number;
   presentToday: number;
   pendingLeave: number;
   pendingAdvances: number;
+  pendingLoans?: number;
   activeLoans: number;
+  payrollMonth?: number;
+  payrollYear?: number;
   monthlyPayroll: {
     totalGross: number;
     totalNet: number;
+    totalCount?: number;
     processedCount: number;
+    draftCount?: number;
   };
   advanceStats?: {
     pending: number;
@@ -112,19 +123,40 @@ export const HRPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  const fetchHRStats = async () => {
+  // Overview Payroll Period state
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => new Date().getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const fetchHRStats = async (m?: number, y?: number) => {
     setIsLoadingStats(true);
     try {
-      const res = await hrApi.getHRStats();
+      const monthToFetch = m !== undefined ? m : selectedMonth;
+      const yearToFetch = y !== undefined ? y : selectedYear;
+      const res = await hrApi.getHRStats({ month: monthToFetch, year: yearToFetch });
       if (res.success) {
-        setStats(res.data);
+        setStats(prev => ({
+          ...(prev || {
+            totalEmployees: 0,
+            presentToday: 0,
+            pendingLeave: 0,
+            pendingAdvances: 0,
+            activeLoans: 0,
+            monthlyPayroll: { totalGross: 0, totalNet: 0, processedCount: 0 }
+          }),
+          ...res.data,
+        }));
+        if (res.data.payrollMonth && m === undefined) {
+          setSelectedMonth(res.data.payrollMonth);
+        }
+        if (res.data.payrollYear && y === undefined) {
+          setSelectedYear(res.data.payrollYear);
+        }
       } else {
         console.error('HR stats API returned unsuccessful response:', res.message);
-        setStats(null);
       }
     } catch (error) {
       console.error('Failed to fetch HR stats:', error);
-      setStats(null); // Set to null on error to prevent undefined issues
     } finally {
       setIsLoadingStats(false);
     }
@@ -196,7 +228,17 @@ export const HRPage: React.FC = () => {
     try {
       const res = await hrApi.getAdvanceStats();
       if (res.success) {
-        setStats(prev => prev ? { ...prev, advanceStats: res.data } : null);
+        setStats(prev => ({
+          ...(prev || {
+            totalEmployees: 0,
+            presentToday: 0,
+            pendingLeave: 0,
+            pendingAdvances: 0,
+            activeLoans: 0,
+            monthlyPayroll: { totalGross: 0, totalNet: 0, processedCount: 0 }
+          }),
+          advanceStats: res.data
+        }));
       } else {
         console.error('Advance stats API returned unsuccessful response:', res.message);
       }
@@ -209,7 +251,17 @@ export const HRPage: React.FC = () => {
     try {
       const res = await hrApi.getLoanStats();
       if (res.success) {
-        setStats(prev => prev ? { ...prev, loanStats: res.data } : null);
+        setStats(prev => ({
+          ...(prev || {
+            totalEmployees: 0,
+            presentToday: 0,
+            pendingLeave: 0,
+            pendingAdvances: 0,
+            activeLoans: 0,
+            monthlyPayroll: { totalGross: 0, totalNet: 0, processedCount: 0 }
+          }),
+          loanStats: res.data
+        }));
       } else {
         console.error('Loan stats API returned unsuccessful response:', res.message);
       }
@@ -218,27 +270,37 @@ export const HRPage: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    fetchHRStats();
-    fetchStaffMembers();
-    fetchLeaveStats();
-    // Also fetch advance and loan stats for overview
-    fetchAdvanceStats();
-    fetchLoanStats();
+  const handleRefreshOverview = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        fetchHRStats(selectedMonth, selectedYear),
+        fetchLeaveStats(),
+        fetchAdvanceStats(),
+        fetchLoanStats(),
+        fetchStaffMembers()
+      ]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
-    // Cleanup function to cancel pending requests on unmount
-    return () => {
-      hrApi.cancelAllRequests();
-    };
-  }, []);
-
   useEffect(() => {
-    if (activeTab === 'attendance') {
+    if (activeTab === 'overview') {
+      fetchHRStats(selectedMonth, selectedYear);
+      fetchStaffMembers();
+      fetchLeaveStats();
+      fetchAdvanceStats();
+      fetchLoanStats();
+    } else if (activeTab === 'attendance') {
       fetchAttendance();
+      fetchStaffMembers();
     } else if (activeTab === 'leave') {
       fetchLeaveRequests();
+      fetchLeaveStats();
+      fetchStaffMembers();
     }
-  }, [activeTab, searchTerm, dateFilter, statusFilter, leaveStatusFilter]);
+  }, [activeTab, selectedMonth, selectedYear, searchTerm, dateFilter, statusFilter, leaveStatusFilter]);
 
   // Auto-calculate hours worked based on check-in and check-out
   const calculateHoursWorked = (checkIn: string, checkOut: string) => {
@@ -330,6 +392,7 @@ export const HRPage: React.FC = () => {
         setIsEditingAttendance(false);
         setSelectedAttendance(null);
         fetchAttendance();
+        fetchHRStats(selectedMonth, selectedYear);
         setAttendanceForm({
           employeeId: '',
           date: new Date().toISOString().split('T')[0],
@@ -431,6 +494,7 @@ export const HRPage: React.FC = () => {
         setShowLeaveReviewModal(false);
         fetchLeaveRequests();
         fetchLeaveStats();
+        fetchHRStats(selectedMonth, selectedYear);
         setSelectedLeave(null);
       } else {
         console.error('Failed to approve leave:', res.message);
@@ -456,6 +520,7 @@ export const HRPage: React.FC = () => {
         setShowLeaveReviewModal(false);
         fetchLeaveRequests();
         fetchLeaveStats();
+        fetchHRStats(selectedMonth, selectedYear);
         setSelectedLeave(null);
       } else {
         console.error('Failed to reject leave:', res.message);
@@ -477,6 +542,7 @@ export const HRPage: React.FC = () => {
       if (res.success) {
         fetchLeaveRequests();
         fetchLeaveStats();
+        fetchHRStats(selectedMonth, selectedYear);
       } else {
         console.error('Failed to delete leave:', res.message);
         alert(res.message || 'Failed to delete leave request');
@@ -724,6 +790,57 @@ export const HRPage: React.FC = () => {
       {/* Overview Tab */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
+          {/* Controls Bar: Payroll Period Selector & Live Refresh */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs font-bold text-slate-700">Payroll Period:</span>
+              <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 border border-slate-200 rounded-lg text-xs">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => {
+                    const newMonth = Number(e.target.value);
+                    setSelectedMonth(newMonth);
+                    fetchHRStats(newMonth, selectedYear);
+                  }}
+                  className="font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                >
+                  {MONTH_NAMES.map((m, i) => (
+                    <option key={m} value={i + 1}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => {
+                    const newYear = Number(e.target.value);
+                    setSelectedYear(newYear);
+                    fetchHRStats(selectedMonth, newYear);
+                  }}
+                  className="font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                >
+                  <option value={2026}>2026</option>
+                  <option value={2025}>2025</option>
+                  <option value={2027}>2027</option>
+                </select>
+              </div>
+              <span className="text-xs text-slate-500 font-medium">
+                Active Period: <span className="font-bold text-slate-700">{MONTH_NAMES[selectedMonth - 1]} {selectedYear}</span>
+              </span>
+            </div>
+
+            <button
+              onClick={handleRefreshOverview}
+              disabled={isRefreshing || isLoadingStats}
+              className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+              title="Refresh all metrics"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing || isLoadingStats ? 'animate-spin text-brand-500' : ''}`} />
+              {isRefreshing || isLoadingStats ? 'Refreshing...' : 'Refresh Metrics'}
+            </button>
+          </div>
+
           {/* Stats Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             <StatCard
@@ -737,7 +854,7 @@ export const HRPage: React.FC = () => {
               title="Present Today"
               value={stats?.presentToday || 0}
               icon={UserCheck}
-              subtext="Currently at work"
+              subtext={stats?.totalEmployees ? `${stats.presentToday} of ${stats.totalEmployees} at work` : "Currently at work"}
               color="emerald"
             />
             <StatCard
@@ -748,10 +865,10 @@ export const HRPage: React.FC = () => {
               color="amber"
             />
             <StatCard
-              title="Payroll This Month"
+              title={`Payroll (${MONTH_NAMES[selectedMonth - 1].slice(0, 3)} ${selectedYear})`}
               value={formatLKR(stats?.monthlyPayroll?.totalGross || 0)}
               icon={DollarSign}
-              subtext="Gross salary payout"
+              subtext={stats?.monthlyPayroll?.totalCount ? `${stats.monthlyPayroll.totalCount} staff record(s)` : "Gross salary payout"}
               color="purple"
             />
             <StatCard
@@ -770,9 +887,9 @@ export const HRPage: React.FC = () => {
             />
             <StatCard
               title="Payroll Processed"
-              value={stats?.monthlyPayroll?.processedCount || 0}
+              value={stats?.monthlyPayroll?.totalCount ? `${stats.monthlyPayroll.processedCount || 0} / ${stats.monthlyPayroll.totalCount}` : (stats?.monthlyPayroll?.processedCount || 0)}
               icon={Clock}
-              subtext="Employees processed"
+              subtext={stats?.monthlyPayroll?.draftCount ? `${stats.monthlyPayroll.draftCount} draft(s) pending` : (stats?.monthlyPayroll?.totalCount ? "All records processed" : "Employees processed")}
               color="emerald"
             />
           </div>
@@ -785,8 +902,10 @@ export const HRPage: React.FC = () => {
                   <DollarSign className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-800">Monthly Net Payroll</h3>
-                  <p className="text-xs text-slate-500">After EPF deductions</p>
+                  <h3 className="text-sm font-bold text-slate-800">
+                    Monthly Net Payroll ({MONTH_NAMES[selectedMonth - 1]} {selectedYear})
+                  </h3>
+                  <p className="text-xs text-slate-500">After statutory EPF & deductions</p>
                 </div>
               </div>
               <p className="text-2xl font-extrabold text-slate-900">
@@ -801,7 +920,9 @@ export const HRPage: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-800">Attendance Rate Today</h3>
-                  <p className="text-xs text-slate-500">Staff present vs total</p>
+                  <p className="text-xs text-slate-500">
+                    {stats?.presentToday || 0} of {stats?.totalEmployees || 0} staff present / at work
+                  </p>
                 </div>
               </div>
               <p className="text-2xl font-extrabold text-slate-900">
