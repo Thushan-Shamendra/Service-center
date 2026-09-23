@@ -364,258 +364,361 @@ export const PayrollPage: React.FC = () => {
       <head>
         <title>Payslip - ${selectedPayroll.payrollId}</title>
         <style>
+          @page {
+            size: A4 portrait;
+            margin: 10mm;
+          }
+          * {
+            box-sizing: border-box;
+          }
           body {
             font-family: Arial, sans-serif;
             margin: 0;
-            padding: 20px;
-            color: #333;
+            padding: 10px;
+            color: #1e293b;
+            font-size: 11px;
+            line-height: 1.3;
           }
           .header {
-            text-align: center;
-            margin-bottom: 30px;
-            border-bottom: 2px solid #0066CC;
-            padding-bottom: 20px;
-          }
-          .company-name {
-            font-size: 28px;
-            color: #0066CC;
-            font-weight: bold;
-            margin-bottom: 5px;
-          }
-          .company-subtitle {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 5px;
-          }
-          .document-title {
-            font-size: 20px;
-            color: #000;
-            font-weight: bold;
-          }
-          .employee-info {
-            background: #f5f5f5;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            font-size: 12px;
-          }
-          .info-label {
-            color: #666;
-            font-weight: bold;
-          }
-          .section {
-            margin-bottom: 20px;
-          }
-          .section-header {
-            background: #E8F8E8;
-            color: #28A745;
-            padding: 8px 15px;
-            font-weight: bold;
-            font-size: 12px;
-            border: 1px solid #28A745;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f0f7ff;
+            border: 1.5px solid #0066cc;
+            border-radius: 4px;
+            padding: 10px 16px;
             margin-bottom: 10px;
           }
+          .company-name {
+            font-size: 20px;
+            color: #0066cc;
+            font-weight: bold;
+          }
+          .company-subtitle {
+            font-size: 9px;
+            font-weight: bold;
+            color: #1e293b;
+            margin-top: 2px;
+          }
+          .company-tagline {
+            font-size: 8px;
+            color: #64748b;
+          }
+          .document-title {
+            font-size: 18px;
+            color: #0066cc;
+            font-weight: bold;
+            text-align: right;
+          }
+          .document-subtitle {
+            font-size: 8.5px;
+            color: #64748b;
+            text-align: right;
+          }
+          .employee-info {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px 16px;
+            font-size: 9px;
+          }
+          .info-label {
+            color: #64748b;
+            font-weight: normal;
+          }
+          .info-val {
+            font-weight: bold;
+            color: #0f172a;
+          }
+          .tables-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 8px;
+          }
+          .table-col {
+            flex: 1;
+          }
+          .section-header {
+            background: #ecfdf5;
+            color: #047857;
+            padding: 5px 8px;
+            font-weight: bold;
+            font-size: 9px;
+            border: 1px solid #10b981;
+            border-radius: 3px 3px 0 0;
+          }
           .deductions-header {
-            background: #FDE8E8;
-            color: #DC3545;
-            border-color: #DC3545;
+            background: #fef2f2;
+            color: #b91c1c;
+            border-color: #ef4444;
           }
           .employer-header {
-            background: #E8F4FD;
-            color: #0066CC;
-            border-color: #0066CC;
+            background: #eff6ff;
+            color: #1d4ed8;
+            border-color: #3b82f6;
+          }
+          .summary-header {
+            background: #f1f5f9;
+            color: #334155;
+            border-color: #64748b;
           }
           table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 11px;
+            font-size: 9px;
+            border: 1px solid #e2e8f0;
+            border-top: none;
           }
           th, td {
-            padding: 8px;
+            padding: 5px 8px;
             text-align: left;
-            border-bottom: 1px solid #ddd;
+            border-bottom: 1px solid #e2e8f0;
           }
           th {
-            background: #f0f0f0;
+            background: #f1f5f9;
             font-weight: bold;
-            color: #666;
+            color: #475569;
+            font-size: 8.5px;
           }
           .amount {
             text-align: right;
             font-weight: bold;
           }
           .total-row {
-            background: #E8F8E8;
+            background: #ecfdf5;
             font-weight: bold;
-            color: #28A745;
+            color: #047857;
           }
-          .deduction-row {
-            color: #DC3545;
+          .deduction-total {
+            background: #fef2f2;
+            color: #b91c1c;
           }
           .net-salary {
-            background: #0066CC;
+            background: #0066cc;
             color: white;
-            font-size: 16px;
+            padding: 10px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 4px;
+            margin: 8px 0;
+          }
+          .net-salary-title {
+            font-size: 12px;
             font-weight: bold;
-            padding: 15px;
-            text-align: center;
-            border-radius: 5px;
-            margin: 20px 0;
+          }
+          .net-salary-subtitle {
+            font-size: 8px;
+            color: #bfdbfe;
           }
           .net-salary-amount {
-            font-size: 24px;
+            font-size: 18px;
+            font-weight: bold;
           }
           .signatures {
             display: flex;
             justify-content: space-between;
-            margin-top: 40px;
-            padding-top: 20px;
+            margin-top: 25px;
+            padding-top: 10px;
           }
           .signature-box {
-            width: 45%;
+            width: 40%;
             text-align: center;
           }
           .signature-line {
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid #64748b;
             margin-bottom: 5px;
-            height: 40px;
+            height: 25px;
+          }
+          .signature-title {
+            font-size: 8px;
+            font-weight: bold;
+            color: #334155;
+          }
+          .signature-sub {
+            font-size: 7px;
+            color: #94a3b8;
           }
           .footer {
             text-align: center;
-            margin-top: 30px;
-            font-size: 10px;
-            color: #999;
-            border-top: 1px solid #ddd;
-            padding-top: 15px;
+            margin-top: 20px;
+            font-size: 7.5px;
+            color: #64748b;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 8px;
           }
           @media print {
-            body { margin: 0; padding: 10px; }
+            body { padding: 0; }
             .no-print { display: none; }
+            .tables-row, .signatures, .footer, .net-salary {
+              page-break-inside: avoid;
+            }
           }
         </style>
       </head>
       <body>
         <div class="header">
-          <div class="company-name">VSMS.LK</div>
-          <div class="company-subtitle">VEHICLE SERVICE MANAGEMENT SYSTEM</div>
-          <div class="document-title">PAYSLIP</div>
+          <div>
+            <div class="company-name">VSMS.LK</div>
+            <div class="company-subtitle">VEHICLE SERVICE MANAGEMENT SYSTEM</div>
+            <div class="company-tagline">Professional Vehicle Care & Fleet Solutions</div>
+          </div>
+          <div>
+            <div class="document-title">PAYSLIP</div>
+            <div class="document-subtitle">Official Salary Statement</div>
+          </div>
         </div>
 
         <div class="employee-info">
-          <div><span class="info-label">Payroll ID:</span> ${selectedPayroll.payrollId}</div>
-          <div><span class="info-label">Employee ID:</span> ${selectedPayroll.employee?.employeeId || selectedPayroll.employee?.managerId || 'N/A'}</div>
-          <div><span class="info-label">Name:</span> ${selectedPayroll.employee?.user?.firstName} ${selectedPayroll.employee?.user?.lastName}</div>
-          <div><span class="info-label">Position:</span> ${selectedPayroll.employee?.user?.role || 'Employee'}</div>
-          <div><span class="info-label">Pay Period:</span> ${MONTH_NAMES[selectedPayroll.month - 1]} ${selectedPayroll.year}</div>
-          <div><span class="info-label">Generated:</span> ${new Date().toLocaleDateString('en-GB')}</div>
+          <div><span class="info-label">Employee ID:</span> <span class="info-val">${selectedPayroll.employee?.employeeId || selectedPayroll.employee?.managerId || 'N/A'}</span></div>
+          <div><span class="info-label">Payroll ID:</span> <span class="info-val">${selectedPayroll.payrollId}</span></div>
+          <div><span class="info-label">Name:</span> <span class="info-val">${selectedPayroll.employee?.user?.firstName || ''} ${selectedPayroll.employee?.user?.lastName || ''}</span></div>
+          <div><span class="info-label">Pay Period:</span> <span class="info-val">${MONTH_NAMES[selectedPayroll.month - 1]} ${selectedPayroll.year}</span></div>
+          <div><span class="info-label">Position:</span> <span class="info-val">${selectedPayroll.employee?.user?.role || 'Employee'}</span></div>
+          <div><span class="info-label">Generated:</span> <span class="info-val">${new Date().toLocaleDateString('en-GB')}</span></div>
         </div>
 
-        <div class="section">
-          <div class="section-header">EARNINGS</div>
-          <table>
-            <tr>
-              <th>Description</th>
-              <th>Amount</th>
-            </tr>
-            <tr>
-              <td>Basic Salary</td>
-              <td class="amount">${formatLKR(selectedPayroll.basicSalary)}</td>
-            </tr>
-            ${selectedPayroll.allowances > 0 ? `
-            <tr>
-              <td>Allowances</td>
-              <td class="amount">${formatLKR(selectedPayroll.allowances)}</td>
-            </tr>` : ''}
-            ${selectedPayroll.overtimePay > 0 ? `
-            <tr>
-              <td>Overtime Pay (${selectedPayroll.overtimeHours || 0} hrs)</td>
-              <td class="amount">${formatLKR(selectedPayroll.overtimePay)}</td>
-            </tr>` : ''}
-            <tr class="total-row">
-              <td>GROSS SALARY</td>
-              <td class="amount">${formatLKR(selectedPayroll.grossSalary)}</td>
-            </tr>
-          </table>
-        </div>
+        <div class="tables-row">
+          <div class="table-col">
+            <div class="section-header">EARNINGS</div>
+            <table>
+              <tr>
+                <th>Description</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+              <tr>
+                <td>Basic Salary</td>
+                <td class="amount">${formatLKR(selectedPayroll.basicSalary)}</td>
+              </tr>
+              ${selectedPayroll.allowances > 0 ? `
+              <tr>
+                <td>Allowances</td>
+                <td class="amount">${formatLKR(selectedPayroll.allowances)}</td>
+              </tr>` : ''}
+              ${selectedPayroll.overtimePay > 0 ? `
+              <tr>
+                <td>Overtime Pay (${selectedPayroll.overtimeHours || 0} hrs)</td>
+                <td class="amount">${formatLKR(selectedPayroll.overtimePay)}</td>
+              </tr>` : ''}
+              <tr class="total-row">
+                <td>GROSS SALARY</td>
+                <td class="amount">${formatLKR(selectedPayroll.grossSalary)}</td>
+              </tr>
+            </table>
+          </div>
 
-        <div class="section">
-          <div class="section-header deductions-header">DEDUCTIONS</div>
-          <table>
-            <tr>
-              <th>Description</th>
-              <th>Amount</th>
-            </tr>
-            ${selectedPayroll.otherDeductions > 0 ? `
-            <tr>
-              <td>Other Deductions</td>
-              <td class="amount">${formatLKR(selectedPayroll.otherDeductions)}</td>
-            </tr>` : ''}
-            ${selectedPayroll.loanDeductions > 0 ? `
-            <tr class="deduction-row">
-              <td>Loan Repayment</td>
-              <td class="amount">-${formatLKR(selectedPayroll.loanDeductions)}</td>
-            </tr>` : ''}
-            ${selectedPayroll.salaryAdvanceDeductions > 0 ? `
-            <tr class="deduction-row">
-              <td>Salary Advance</td>
-              <td class="amount">-${formatLKR(selectedPayroll.salaryAdvanceDeductions)}</td>
-            </tr>` : ''}
-            ${selectedPayroll.epfEmployee > 0 ? `
-            <tr class="deduction-row">
-              <td>EPF (Employee 8%)</td>
-              <td class="amount">-${formatLKR(selectedPayroll.epfEmployee)}</td>
-            </tr>` : ''}
-            <tr class="total-row" style="background: #FDE8E8; color: #DC3545;">
-              <td>TOTAL DEDUCTIONS</td>
-              <td class="amount">${formatLKR(selectedPayroll.totalDeductions)}</td>
-            </tr>
-          </table>
+          <div class="table-col">
+            <div class="section-header deductions-header">DEDUCTIONS</div>
+            <table>
+              <tr>
+                <th>Description</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+              ${selectedPayroll.epfEmployee > 0 ? `
+              <tr>
+                <td>EPF (Employee 8%)</td>
+                <td class="amount" style="color: #dc2626;">-${formatLKR(selectedPayroll.epfEmployee)}</td>
+              </tr>` : ''}
+              ${selectedPayroll.loanDeductions > 0 ? `
+              <tr>
+                <td>Loan Repayment</td>
+                <td class="amount" style="color: #dc2626;">-${formatLKR(selectedPayroll.loanDeductions)}</td>
+              </tr>` : ''}
+              ${selectedPayroll.salaryAdvanceDeductions > 0 ? `
+              <tr>
+                <td>Salary Advance</td>
+                <td class="amount" style="color: #dc2626;">-${formatLKR(selectedPayroll.salaryAdvanceDeductions)}</td>
+              </tr>` : ''}
+              ${selectedPayroll.otherDeductions > 0 ? `
+              <tr>
+                <td>Other Deductions</td>
+                <td class="amount" style="color: #dc2626;">-${formatLKR(selectedPayroll.otherDeductions)}</td>
+              </tr>` : ''}
+              ${(!selectedPayroll.epfEmployee && !selectedPayroll.loanDeductions && !selectedPayroll.salaryAdvanceDeductions && !selectedPayroll.otherDeductions) ? `
+              <tr>
+                <td>No Deductions</td>
+                <td class="amount">LKR 0.00</td>
+              </tr>` : ''}
+              <tr class="total-row deduction-total">
+                <td>TOTAL DEDUCTIONS</td>
+                <td class="amount">-${formatLKR(selectedPayroll.totalDeductions)}</td>
+              </tr>
+            </table>
+          </div>
         </div>
 
         <div class="net-salary">
-          <div>NET SALARY PAYABLE</div>
+          <div>
+            <div class="net-salary-title">NET SALARY PAYABLE</div>
+            <div class="net-salary-subtitle">Take Home Pay for the Period</div>
+          </div>
           <div class="net-salary-amount">${formatLKR(selectedPayroll.netSalary)}</div>
         </div>
 
-        <div class="section">
-          <div class="section-header employer-header">EMPLOYER CONTRIBUTIONS (For Information Only)</div>
-          <table>
-            <tr>
-              <th>Description</th>
-              <th>Percentage</th>
-              <th>Amount</th>
-            </tr>
-            <tr>
-              <td>EPF (Employer)</td>
-              <td>12%</td>
-              <td class="amount">${formatLKR(selectedPayroll.epfEmployer)}</td>
-            </tr>
-            <tr>
-              <td>ETF (Employer)</td>
-              <td>3%</td>
-              <td class="amount">${formatLKR(selectedPayroll.etfEmployer)}</td>
-            </tr>
-          </table>
+        <div class="tables-row">
+          <div class="table-col">
+            <div class="section-header employer-header">EMPLOYER CONTRIBUTIONS (Informational)</div>
+            <table>
+              <tr>
+                <th>Contribution</th>
+                <th>Rate</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+              <tr>
+                <td>EPF (Employer)</td>
+                <td>12%</td>
+                <td class="amount">${formatLKR(selectedPayroll.epfEmployer)}</td>
+              </tr>
+              <tr>
+                <td>ETF (Employer)</td>
+                <td>3%</td>
+                <td class="amount">${formatLKR(selectedPayroll.etfEmployer)}</td>
+              </tr>
+            </table>
+          </div>
+
+          <div class="table-col">
+            <div class="section-header summary-header">PAYMENT SUMMARY</div>
+            <table>
+              <tr>
+                <td>Payment Method:</td>
+                <td class="amount" style="font-weight: normal;">${selectedPayroll.paymentMethod || 'Bank Transfer'}</td>
+              </tr>
+              <tr>
+                <td>Payment Status:</td>
+                <td class="amount" style="color: ${selectedPayroll.status === 'processed' || selectedPayroll.status === 'paid' ? '#16a34a' : '#d97706'};">
+                  ${selectedPayroll.status?.toUpperCase() || 'DRAFT'}
+                </td>
+              </tr>
+              <tr>
+                <td>Payment Date:</td>
+                <td class="amount" style="font-weight: normal;">${selectedPayroll.paymentDate ? new Date(selectedPayroll.paymentDate).toLocaleDateString('en-GB') : 'Processed with Payroll'}</td>
+              </tr>
+            </table>
+          </div>
         </div>
 
         <div class="signatures">
           <div class="signature-box">
             <div class="signature-line"></div>
-            <div>Authorised Signature</div>
+            <div class="signature-title">Authorised Signature</div>
+            <div class="signature-sub">Management / Finance</div>
           </div>
           <div class="signature-box">
             <div class="signature-line"></div>
-            <div>Employee Signature</div>
+            <div class="signature-title">Employee Signature</div>
+            <div class="signature-sub">Acknowledgement of Receipt</div>
           </div>
         </div>
 
         <div class="footer">
-          <div>This is a computer-generated document and does not require a physical signature.</div>
-          <div>VSMS.LK - Vehicle Service Management System | Professional Vehicle Care</div>
-          <div>Generated on ${new Date().toLocaleString('en-GB')} | Document ID: ${selectedPayroll.payrollId}</div>
+          <div>This is a computer-generated document and does not require a physical signature when processed electronically.</div>
+          <div>VSMS.LK - Vehicle Service Management System | Professional Vehicle Care & Fleet Solutions</div>
+          <div>Generated on ${new Date().toLocaleString('en-GB')} | Document ID: ${selectedPayroll.payrollId} | Page 1 of 1</div>
         </div>
       </body>
       </html>
