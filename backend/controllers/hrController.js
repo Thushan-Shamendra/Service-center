@@ -18,7 +18,7 @@ export const getAttendance = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const query = {};
-    if (req.user.role === 'employee') {
+    if (req.user.role === 'employee' || req.query.self === 'true' || req.query.self === true) {
       const emp = await Employee.findOne({ user: req.user._id });
       if (emp) query.employee = emp._id;
     } else if (req.query.employee) {

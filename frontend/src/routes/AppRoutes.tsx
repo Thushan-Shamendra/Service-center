@@ -265,6 +265,9 @@ export const AppRoutes: React.FC = () => {
               <Route path="reports/inventory" element={<InventoryReportsPage />} />
               <Route path="reports/workshop/technician-productivity" element={<TechnicianProductivityReport />} />
               <Route path="profile" element={<ManagerProfilePage />} />
+              <Route path="attendance" element={<EmployeeAttendancePage />} />
+              <Route path="advances" element={<EmployeeAdvancesPage />} />
+              <Route path="loans" element={<EmployeeAdvancesPage />} />
               <Route path="leave-management" element={<ManagerLeaveManagementPage />} />
               <Route path="leave-request/:requestId" element={<ManagerLeaveManagementPage />} />
             </Routes>

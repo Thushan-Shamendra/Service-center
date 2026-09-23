@@ -72,7 +72,7 @@ const createRequestController = (key: string): AbortController => {
 };
 
 export const hrApi = {
-  getAttendance: async (params?: { employee?: string; date?: string; startDate?: string; endDate?: string; status?: string; limit?: number; page?: number }) => {
+  getAttendance: async (params?: { employee?: string; self?: boolean | string; date?: string; startDate?: string; endDate?: string; status?: string; limit?: number; page?: number }) => {
     const key = generateRequestKey('/hr/attendance', params);
     const controller = createRequestController(key);
     
@@ -230,7 +230,7 @@ export const hrApi = {
   },
 
   // Salary Advance API functions
-  getSalaryAdvances: async (params?: { employee?: string; status?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) => {
+  getSalaryAdvances: async (params?: { employee?: string; self?: boolean | string; status?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) => {
     const key = generateRequestKey('/hr/salary-advances', params);
     const controller = createRequestController(key);
     
@@ -261,9 +261,9 @@ export const hrApi = {
     );
   },
 
-  getAdvanceStats: async () => {
+  getAdvanceStats: async (params?: { self?: boolean | string }) => {
     return apiWithRetry(
-      () => api.get('/hr/salary-advances/stats'),
+      () => api.get('/hr/salary-advances/stats', { params }),
       'getAdvanceStats'
     );
   },
@@ -283,7 +283,7 @@ export const hrApi = {
   },
 
   // Loan API functions
-  getLoans: async (params?: { employee?: string; status?: string; staffType?: string; page?: number; limit?: number }) => {
+  getLoans: async (params?: { employee?: string; self?: boolean | string; status?: string; staffType?: string; page?: number; limit?: number }) => {
     const key = generateRequestKey('/hr/loans', params);
     const controller = createRequestController(key);
     
@@ -314,9 +314,9 @@ export const hrApi = {
     );
   },
 
-  getLoanStats: async () => {
+  getLoanStats: async (params?: { self?: boolean | string }) => {
     return apiWithRetry(
-      () => api.get('/hr/loans/stats'),
+      () => api.get('/hr/loans/stats', { params }),
       'getLoanStats'
     );
   },

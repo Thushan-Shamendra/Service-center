@@ -134,7 +134,7 @@ export const EmployeeAttendancePage: React.FC = () => {
   const fetchAttendance = useCallback(async (silent = false) => {
     if (!silent) setIsRefreshing(true);
     try {
-      const res = await hrApi.getAttendance({ limit: 100 });
+      const res = await hrApi.getAttendance({ limit: 100, self: true });
       if (res.data?.success || res.success || Array.isArray(res.data)) {
         const records: AttendanceRecord[] = res.data?.data || res.data || [];
         setAttendanceList(records);
@@ -359,7 +359,7 @@ export const EmployeeAttendancePage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
           <button
-            onClick={() => navigate('/employee/dashboard')}
+            onClick={() => navigate(user?.role === 'manager' ? '/manager/dashboard' : '/employee/dashboard')}
             className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-600"
             title="Back to dashboard"
           >

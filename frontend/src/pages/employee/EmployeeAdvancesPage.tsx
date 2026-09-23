@@ -24,6 +24,7 @@ import {
   ArrowRight,
   ShieldCheck,
   TrendingUp,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface AdvanceStats {
@@ -115,8 +116,8 @@ export const EmployeeAdvancesPage: React.FC = () => {
     setIsLoadingAdvances(true);
     try {
       const [advancesRes, statsRes] = await Promise.allSettled([
-        hrApi.getSalaryAdvances(advanceStatusFilter ? { status: advanceStatusFilter } : {}),
-        hrApi.getAdvanceStats(),
+        hrApi.getSalaryAdvances({ self: true, ...(advanceStatusFilter ? { status: advanceStatusFilter } : {}) }),
+        hrApi.getAdvanceStats({ self: true }),
       ]);
 
       if (advancesRes.status === 'fulfilled' && advancesRes.value?.success) {
@@ -151,8 +152,8 @@ export const EmployeeAdvancesPage: React.FC = () => {
     setIsLoadingLoans(true);
     try {
       const [loansRes, statsRes] = await Promise.allSettled([
-        hrApi.getLoans(loanStatusFilter ? { status: loanStatusFilter } : {}),
-        hrApi.getLoanStats(),
+        hrApi.getLoans({ self: true, ...(loanStatusFilter ? { status: loanStatusFilter } : {}) }),
+        hrApi.getLoanStats({ self: true }),
       ]);
 
       if (loansRes.status === 'fulfilled' && loansRes.value?.success) {
@@ -314,10 +315,19 @@ export const EmployeeAdvancesPage: React.FC = () => {
       <div className="bg-gradient-to-r from-slate-900 via-brand-800 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="max-w-2xl">
-            <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold uppercase tracking-wider mb-3 inline-flex items-center gap-1.5 backdrop-blur-xs">
-              <Wallet className="w-3.5 h-3.5 text-blue-200" />
-              Employee Financial Self-Service
-            </span>
+            <div className="flex items-center gap-2 mb-3">
+              <button
+                onClick={() => navigate(user?.role === 'manager' ? '/manager/dashboard' : '/employee/dashboard')}
+                className="p-1.5 bg-white/10 hover:bg-white/20 rounded-xl transition-colors text-white"
+                title="Back to dashboard"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5 backdrop-blur-xs">
+                <Wallet className="w-3.5 h-3.5 text-blue-200" />
+                Financial Self-Service
+              </span>
+            </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight mb-2">
               Advances & Loan Applications
             </h1>

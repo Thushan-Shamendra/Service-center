@@ -12,8 +12,8 @@ export const getLoans = async (req, res) => {
 
     const query = {};
 
-    // If user is an employee, only return their own loans
-    if (req.user.role === 'employee') {
+    // If user is an employee or requesting own records, only return their own loans
+    if (req.user.role === 'employee' || req.query.self === 'true' || req.query.self === true) {
       const currentEmployee = await Employee.findOne({ user: req.user._id });
       if (!currentEmployee) {
         return res.status(200).json({
@@ -99,8 +99,8 @@ export const createLoan = async (req, res) => {
 
     let targetEmployeeId = employeeId;
 
-    // If user is an employee, auto-detect their own employee profile
-    if (req.user.role === 'employee') {
+    // If user is an employee or self-application (no employeeId provided), auto-detect their own employee profile
+    if (req.user.role === 'employee' || !employeeId) {
       const emp = await Employee.findOne({ user: req.user._id });
       if (!emp) {
         return res.status(404).json({ success: false, message: 'Employee profile not found' });
@@ -253,7 +253,7 @@ export const updateLoanStatus = async (req, res) => {
 export const getLoanStats = async (req, res) => {
   try {
     const filter = {};
-    if (req.user.role === 'employee') {
+    if (req.user.role === 'employee' || req.query.self === 'true' || req.query.self === true) {
       const employee = await Employee.findOne({ user: req.user._id });
       if (employee) {
         filter.employee = employee._id;
