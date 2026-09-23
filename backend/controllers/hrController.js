@@ -564,6 +564,8 @@ export const updatePayroll = async (req, res) => {
       otherDeductions, 
       loanDeductions, 
       salaryAdvanceDeductions,
+      overtimeHours: reqOvertimeHours,
+      overtimePay: reqOvertimePay,
       status 
     } = req.body;
 
@@ -571,18 +573,35 @@ export const updatePayroll = async (req, res) => {
     if (!payroll) return res.status(404).json({ success: false, message: 'Payroll record not found' });
 
     const employee = await Employee.findById(payroll.employee);
-    const basic = employee.basicSalary || 50000;
-    const allowancesValue = allowances !== undefined ? allowances : payroll.allowances;
+    const basic = (employee && employee.basicSalary) || payroll.basicSalary || 50000;
+    const allowancesValue = allowances !== undefined ? Number(allowances) : (payroll.allowances || 0);
     
-    const grossSalary = basic + allowancesValue + payroll.overtimePay;
+    const settings = await PayrollSettings.findOne({ active: true }) || {};
+    const epfEmployeeRate = settings.epfEmployeeRate || 8;
+    const epfEmployerRate = settings.epfEmployerRate || 12;
+    const etfEmployerRate = settings.etfEmployerRate || 3;
+
+    let overtimePay = payroll.overtimePay || 0;
+    let overtimeHours = payroll.overtimeHours || 0;
+    if (reqOvertimeHours !== undefined) {
+      overtimeHours = Number(reqOvertimeHours) || 0;
+      const overtimeRateMultiplier = settings.overtimeRateMultiplier || 1.5;
+      const standardHours = settings.standardWorkingHours || 160;
+      const overtimeRate = (basic / standardHours) * overtimeRateMultiplier;
+      overtimePay = Math.round(overtimeHours * overtimeRate);
+    } else if (reqOvertimePay !== undefined) {
+      overtimePay = Number(reqOvertimePay) || 0;
+    }
+
+    const grossSalary = basic + allowancesValue + overtimePay;
 
     // Sri Lanka Statutory EPF / ETF
-    const epfEmployee = Math.round(basic * 0.08);
-    const epfEmployer = Math.round(basic * 0.12);
-    const etfEmployer = Math.round(basic * 0.03);
+    const epfEmployee = Math.round(basic * (epfEmployeeRate / 100));
+    const epfEmployer = Math.round(basic * (epfEmployerRate / 100));
+    const etfEmployer = Math.round(basic * (etfEmployerRate / 100));
 
     // Get loan deductions if not provided
-    let loanDeductionsTotal = loanDeductions !== undefined ? loanDeductions : payroll.loanDeductions;
+    let loanDeductionsTotal = loanDeductions !== undefined ? Number(loanDeductions) : payroll.loanDeductions;
     if (loanDeductions === undefined) {
       const activeLoans = await Loan.find({
         employee: payroll.employee,
@@ -591,18 +610,27 @@ export const updatePayroll = async (req, res) => {
       loanDeductionsTotal = activeLoans.reduce((sum, loan) => sum + loan.monthlyDeduction, 0);
     }
 
+    const otherDeductionsValue = otherDeductions !== undefined ? Number(otherDeductions) : (payroll.otherDeductions || 0);
+    const salaryAdvanceDeductionsValue = salaryAdvanceDeductions !== undefined ? Number(salaryAdvanceDeductions) : (payroll.salaryAdvanceDeductions || 0);
+
     // ETF is employer contribution only, not deducted from employee
     const totalDeductions = epfEmployee + 
-      (otherDeductions !== undefined ? otherDeductions : payroll.otherDeductions) + 
+      otherDeductionsValue + 
       loanDeductionsTotal + 
-      (salaryAdvanceDeductions !== undefined ? salaryAdvanceDeductions : payroll.salaryAdvanceDeductions);
+      salaryAdvanceDeductionsValue;
     
     const netSalary = grossSalary - totalDeductions;
 
+    payroll.basicSalary = basic;
     payroll.allowances = allowancesValue;
-    payroll.otherDeductions = otherDeductions !== undefined ? otherDeductions : payroll.otherDeductions;
-    payroll.loanDeductions = loanDeductions !== undefined ? loanDeductions : payroll.loanDeductions;
-    payroll.salaryAdvanceDeductions = salaryAdvanceDeductions !== undefined ? salaryAdvanceDeductions : payroll.salaryAdvanceDeductions;
+    payroll.overtimeHours = overtimeHours;
+    payroll.overtimePay = overtimePay;
+    payroll.otherDeductions = otherDeductionsValue;
+    payroll.loanDeductions = loanDeductionsTotal;
+    payroll.salaryAdvanceDeductions = salaryAdvanceDeductionsValue;
+    payroll.epfEmployee = epfEmployee;
+    payroll.epfEmployer = epfEmployer;
+    payroll.etfEmployer = etfEmployer;
     payroll.grossSalary = grossSalary;
     payroll.totalDeductions = totalDeductions;
     payroll.netSalary = netSalary;
@@ -611,9 +639,12 @@ export const updatePayroll = async (req, res) => {
     await payroll.save();
 
     const populatedPayroll = await Payroll.findById(payroll._id)
-      .populate({ path: 'employee', populate: { path: 'user', select: 'firstName lastName' } });
+      .populate({ 
+        path: 'employee', 
+        populate: { path: 'user', select: 'firstName lastName email role' } 
+      });
 
-    res.status(200).json({ success: true, data: populatedPayroll, message: 'Payroll updated' });
+    res.status(200).json({ success: true, data: populatedPayroll, message: 'Payroll updated successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

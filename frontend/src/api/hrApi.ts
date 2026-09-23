@@ -127,7 +127,7 @@ export const hrApi = {
     );
   },
 
-  updatePayroll: async (id: string, data: { allowances?: number; otherDeductions?: number; loanDeductions?: number; salaryAdvanceDeductions?: number; status?: string }) => {
+  updatePayroll: async (id: string, data: { allowances?: number; otherDeductions?: number; loanDeductions?: number; salaryAdvanceDeductions?: number; overtimeHours?: number; overtimePay?: number; basicSalary?: number; status?: string }) => {
     return apiWithRetry(
       () => api.put(`/hr/payroll/${id}`, data),
       'updatePayroll'

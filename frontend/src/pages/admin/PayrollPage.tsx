@@ -287,6 +287,33 @@ export const PayrollPage: React.FC = () => {
     setShowPayrollModal(true);
   };
 
+  const handleSaveDraft = async () => {
+    if (!selectedPayroll?._id) return;
+    setIsSubmitting(true);
+    try {
+      const res = await hrApi.updatePayroll(selectedPayroll._id, {
+        allowances: Number(payrollForm.allowances) || 0,
+        otherDeductions: Number(payrollForm.otherDeductions) || 0,
+        loanDeductions: Number(payrollForm.loanDeductions) || 0,
+        salaryAdvanceDeductions: Number(payrollForm.salaryAdvanceDeductions) || 0,
+        status: 'draft',
+      });
+      if (res.success) {
+        setSelectedPayroll(res.data);
+        setIsEditingPayroll(false);
+        await fetchPayroll();
+        alert('Draft payroll updated successfully');
+      } else {
+        alert(res.message || 'Failed to update payroll draft');
+      }
+    } catch (error: any) {
+      console.error('Failed to update payroll draft:', error);
+      alert(error.response?.data?.message || 'Failed to update payroll draft');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleGeneratePayslip = (payroll: any) => {
     setSelectedPayroll(payroll);
     setShowPayslipModal(true);
@@ -1284,25 +1311,15 @@ export const PayrollPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Employee / Manager *</label>
-                  {isEditingPayroll && selectedPayroll.status === 'draft' ? (
-                    <select
-                      value={payrollForm.employeeId}
-                      onChange={(e) => setPayrollForm({ ...payrollForm, employeeId: e.target.value })}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
-                    >
-                      <option value="">Select Staff ▼</option>
-                      {staffMembers.map((staff) => (
-                        <option key={staff._id} value={staff.profile?._id}>
-                          {staff.displayId}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
-                      {selectedPayroll.employee?.employeeId || selectedPayroll.employee?.managerId}
-                    </div>
-                  )}
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Employee / Manager</label>
+                  <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
+                    <span className="font-bold">
+                      {selectedPayroll.employee?.employeeId || selectedPayroll.employee?.managerId || 'N/A'}
+                      {selectedPayroll.employee?.user ? ` - ${selectedPayroll.employee.user.firstName} ${selectedPayroll.employee.user.lastName}` : ''}
+                    </span>
+                    <span className="text-slate-400">🔒</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">Auto Filled</p>
                 </div>
 
                 <div>
@@ -1392,7 +1409,17 @@ export const PayrollPage: React.FC = () => {
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">Net Salary</label>
                   <div className="flex items-center justify-center px-6 py-4 bg-emerald-50 border border-emerald-200 rounded-lg">
-                    <span className="text-2xl font-extrabold text-emerald-700">{formatLKR(selectedPayroll.netSalary)}</span>
+                    <span className="text-2xl font-extrabold text-emerald-700">
+                      {isEditingPayroll ? formatLKR(
+                        (selectedPayroll.basicSalary || 0) +
+                        (Number(payrollForm.allowances) || 0) +
+                        (selectedPayroll.overtimePay || 0) -
+                        (selectedPayroll.epfEmployee || 0) -
+                        (selectedPayroll.loanDeductions || 0) -
+                        (selectedPayroll.salaryAdvanceDeductions || 0) -
+                        (Number(payrollForm.otherDeductions) || 0)
+                      ) : formatLKR(selectedPayroll.netSalary)}
+                    </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1 text-center">🔒 Auto Calculated</p>
                 </div>
@@ -1410,13 +1437,32 @@ export const PayrollPage: React.FC = () => {
                   </button>
                   {isEditingPayroll && selectedPayroll.status === 'draft' && (
                     <button
-                      onClick={() => {
-                        setIsEditingPayroll(false);
-                      }}
-                      className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-bold shadow-md shadow-blue-500/20 transition-all"
+                      onClick={handleSaveDraft}
+                      disabled={isSubmitting}
+                      className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-bold shadow-md shadow-blue-500/20 transition-all disabled:opacity-50"
                     >
                       <Save className="w-4 h-4" />
-                      Save Draft
+                      {isSubmitting ? 'Saving...' : 'Save Draft'}
+                    </button>
+                  )}
+                  {!isEditingPayroll && selectedPayroll.status === 'draft' && (
+                    <button
+                      onClick={() => {
+                        setPayrollForm({
+                          employeeId: selectedPayroll.employee?._id,
+                          month: selectedPayroll.month,
+                          year: selectedPayroll.year,
+                          allowances: selectedPayroll.allowances || 0,
+                          otherDeductions: selectedPayroll.otherDeductions || 0,
+                          loanDeductions: selectedPayroll.loanDeductions || 0,
+                          salaryAdvanceDeductions: selectedPayroll.salaryAdvanceDeductions || 0,
+                        });
+                        setIsEditingPayroll(true);
+                      }}
+                      className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-bold shadow-md shadow-orange-500/20 transition-all"
+                    >
+                      <Edit className="w-4 h-4" />
+                      Edit Draft
                     </button>
                   )}
                   <button
@@ -1443,7 +1489,7 @@ export const PayrollPage: React.FC = () => {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">Allowances</span>
-                        <span className="font-mono">{formatLKR(selectedPayroll.allowances)}</span>
+                        <span className="font-mono">{formatLKR(isEditingPayroll ? (Number(payrollForm.allowances) || 0) : selectedPayroll.allowances)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">Overtime</span>
@@ -1451,7 +1497,11 @@ export const PayrollPage: React.FC = () => {
                       </div>
                       <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
                         <span className="text-slate-500 font-bold">Gross Salary</span>
-                        <span className="font-bold text-slate-800">{formatLKR(selectedPayroll.grossSalary)}</span>
+                        <span className="font-bold text-slate-800">{formatLKR(
+                          (selectedPayroll.basicSalary || 0) + 
+                          (isEditingPayroll ? (Number(payrollForm.allowances) || 0) : (selectedPayroll.allowances || 0)) + 
+                          (selectedPayroll.overtimePay || 0)
+                        )}</span>
                       </div>
                     </div>
                   </div>
@@ -1461,7 +1511,7 @@ export const PayrollPage: React.FC = () => {
                     <div className="space-y-1">
                       <div className="flex justify-between">
                         <span className="text-slate-500">Deductions</span>
-                        <span className="font-mono">{formatLKR(selectedPayroll.otherDeductions)}</span>
+                        <span className="font-mono">{formatLKR(isEditingPayroll ? (Number(payrollForm.otherDeductions) || 0) : selectedPayroll.otherDeductions)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">Loan</span>
@@ -1477,7 +1527,15 @@ export const PayrollPage: React.FC = () => {
                       </div>
                       <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
                         <span className="text-slate-500 font-bold">Net Salary</span>
-                        <span className="font-bold text-emerald-600">{formatLKR(selectedPayroll.netSalary)}</span>
+                        <span className="font-bold text-emerald-600">{formatLKR(
+                          (selectedPayroll.basicSalary || 0) +
+                          (isEditingPayroll ? (Number(payrollForm.allowances) || 0) : (selectedPayroll.allowances || 0)) +
+                          (selectedPayroll.overtimePay || 0) -
+                          (selectedPayroll.epfEmployee || 0) -
+                          (selectedPayroll.loanDeductions || 0) -
+                          (selectedPayroll.salaryAdvanceDeductions || 0) -
+                          (isEditingPayroll ? (Number(payrollForm.otherDeductions) || 0) : (selectedPayroll.otherDeductions || 0))
+                        )}</span>
                       </div>
                     </div>
                   </div>
