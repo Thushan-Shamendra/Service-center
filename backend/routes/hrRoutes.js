@@ -47,10 +47,12 @@ router.post('/payroll/process', authorize('administrator'), processPayroll);
 router.post('/payroll/calculate-preview', authorize('administrator'), calculatePayrollPreview);
 router.post('/payroll/bulk-calculate', authorize('administrator'), bulkCalculatePayroll);
 router.post('/payroll/bulk-process', authorize('administrator'), bulkProcessPayroll);
-router.route('/payroll').get(getPayroll).post(authorize('administrator', 'manager'), createPayroll);
-router.get('/payroll/:id', getPayrollById);
+router.route('/payroll')
+  .get(authorize('administrator', 'manager', 'employee'), getPayroll)
+  .post(authorize('administrator', 'manager'), createPayroll);
+router.get('/payroll/:id', authorize('administrator', 'manager', 'employee'), getPayrollById);
 router.put('/payroll/:id', authorize('administrator', 'manager'), updatePayroll);
-router.get('/payroll/:id/payslip', authorize('administrator', 'manager'), generatePayslip);
+router.get('/payroll/:id/payslip', authorize('administrator', 'manager', 'employee'), generatePayslip);
 router.put('/payroll/:id/status', authorize('administrator', 'manager'), updatePayrollStatus);
 
 // Leave routes

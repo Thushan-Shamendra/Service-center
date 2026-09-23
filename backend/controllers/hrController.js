@@ -269,12 +269,31 @@ export const getPayroll = async (req, res) => {
     const query = {};
     if (req.query.month) query.month = parseInt(req.query.month);
     if (req.query.year) query.year = parseInt(req.query.year);
-    if (req.query.employee) query.employee = req.query.employee;
     if (req.query.status) query.status = req.query.status;
+
+    // Scope to personal records if employee or self flag is true
+    if (req.user.role === 'employee' || req.query.self === 'true' || req.query.self === true) {
+      const emp = await Employee.findOne({ user: req.user._id });
+      if (!emp) {
+        return res.status(200).json({
+          success: true,
+          data: [],
+          pagination: {
+            page,
+            limit,
+            total: 0,
+            pages: 0,
+          },
+        });
+      }
+      query.employee = emp._id;
+    } else if (req.query.employee) {
+      query.employee = req.query.employee;
+    }
 
     const [payrolls, total] = await Promise.all([
       Payroll.find(query)
-        .populate({ path: 'employee', populate: { path: 'user', select: 'firstName lastName' } })
+        .populate({ path: 'employee', populate: { path: 'user', select: 'firstName lastName email' } })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -304,6 +323,18 @@ export const getPayrollById = async (req, res) => {
       .populate({ path: 'employee', populate: { path: 'user', select: 'firstName lastName email mobile' } });
 
     if (!payroll) return res.status(404).json({ success: false, message: 'Payroll record not found' });
+
+    // Restrict employees to only their own payroll record
+    if (req.user.role === 'employee') {
+      const emp = await Employee.findOne({ user: req.user._id });
+      const recordEmpId = payroll.employee?._id || payroll.employee;
+      if (!emp || recordEmpId.toString() !== emp._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: You are not authorized to view another employee\'s payroll record',
+        });
+      }
+    }
 
     res.status(200).json({ success: true, data: payroll });
   } catch (error) {
@@ -597,6 +628,18 @@ export const generatePayslip = async (req, res) => {
       populate: { path: 'user', select: 'firstName lastName' } 
     });
     if (!payroll) return res.status(404).json({ success: false, message: 'Payroll record not found' });
+
+    // Restrict employees to only their own payslip
+    if (req.user.role === 'employee') {
+      const emp = await Employee.findOne({ user: req.user._id });
+      const recordEmpId = payroll.employee?._id || payroll.employee;
+      if (!emp || recordEmpId.toString() !== emp._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: You are not authorized to download another employee\'s payslip',
+        });
+      }
+    }
 
     const pdfPath = await generatePayslipPDF(payroll, payroll.employee);
 
