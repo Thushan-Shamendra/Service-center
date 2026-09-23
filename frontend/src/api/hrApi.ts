@@ -155,7 +155,7 @@ export const hrApi = {
     );
   },
 
-  calculatePayrollPreview: async (data: { month: number; year: number; includeOvertime?: boolean }) => {
+  calculatePayrollPreview: async (data: { month: number; year: number; includeOvertime?: boolean; employeeId?: string }) => {
     return apiWithRetry(
       () => api.post('/hr/payroll/calculate-preview', data),
       'calculatePayrollPreview'

@@ -160,13 +160,7 @@ export const PayrollPage: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    fetchPayroll();
-    fetchPayrollSettings();
-    fetchStaffMembers();
-  }, [month, year]);
-
-  const handleCalculatePreview = async () => {
+  const handleCalculatePreview = async (silent = false) => {
     setIsCalculating(true);
     try {
       const res = await hrApi.calculatePayrollPreview({ month, year, includeOvertime });
@@ -175,11 +169,26 @@ export const PayrollPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to calculate preview:', error);
-      alert('Failed to calculate payroll preview');
+      if (!silent) {
+        alert('Failed to calculate payroll preview');
+      }
     } finally {
       setIsCalculating(false);
     }
   };
+
+  useEffect(() => {
+    fetchPayroll();
+    fetchPayrollSettings();
+    fetchStaffMembers();
+    handleCalculatePreview(true);
+  }, [month, year]);
+
+  useEffect(() => {
+    if (showProcessModal && !payrollPreview) {
+      handleCalculatePreview(true);
+    }
+  }, [showProcessModal]);
 
   const handleBulkCalculate = async () => {
     setIsCalculating(true);
@@ -626,32 +635,50 @@ export const PayrollPage: React.FC = () => {
     return staffMembers.find(s => s.profile?._id === (selectedEmployee || payrollForm.employeeId));
   };
 
+  const getSelectedEmployeePreview = () => {
+    if (!selectedEmployee) return null;
+    const selectedStaff = getSelectedEmployee();
+    return payrollPreview?.employees?.find(
+      (e: any) => (e._id && String(e._id) === String(selectedEmployee)) || 
+                  (selectedStaff?.displayId && e.employeeId === selectedStaff.displayId)
+    );
+  };
+
   const calculatePayrollPreview = () => {
     const employee = getSelectedEmployee();
     if (!employee) return null;
 
-    const basic = employee.profile?.basicSalary || 50000;
-    const allowances = payrollForm.allowances || 0;
-    const overtimePay = 0;
+    const empPreview = getSelectedEmployeePreview();
+    const basic = employee.profile?.basicSalary || empPreview?.basicSalary || 50000;
+    const allowances = individualPayrollForm.allowances || payrollForm.allowances || 0;
+    const overtimeHours = empPreview?.overtimeHours || 0;
+    const overtimePay = empPreview?.overtimePay || 0;
     const grossSalary = basic + allowances + overtimePay;
     
     const epfRate = payrollSettings?.epfEmployeeRate || 8;
     const etfRate = payrollSettings?.etfEmployerRate || 3;
     
-    const epfEmployee = Math.round(basic * (epfRate / 100));
-    const etfEmployer = Math.round(basic * (etfRate / 100));
+    const epfEmployee = empPreview?.epfEmployee || Math.round(basic * (epfRate / 100));
+    const etfEmployer = empPreview?.etfEmployer || Math.round(basic * (etfRate / 100));
+    const loanDeductions = empPreview?.loanDeductions || payrollForm.loanDeductions || 0;
+    const salaryAdvanceDeductions = empPreview?.salaryAdvanceDeductions || payrollForm.salaryAdvanceDeductions || 0;
+    const otherDeductions = individualPayrollForm.otherDeductions || payrollForm.otherDeductions || 0;
     
     // ETF is employer contribution only, not deducted from employee
-    const totalDeductions = epfEmployee + payrollForm.otherDeductions + payrollForm.loanDeductions + payrollForm.salaryAdvanceDeductions;
+    const totalDeductions = epfEmployee + otherDeductions + loanDeductions + salaryAdvanceDeductions;
     const netSalary = grossSalary - totalDeductions;
 
     return {
       basic,
       allowances,
+      overtimeHours,
       overtimePay,
       grossSalary,
       epfEmployee,
       etfEmployer,
+      loanDeductions,
+      salaryAdvanceDeductions,
+      otherDeductions,
       totalDeductions,
       netSalary,
     };
@@ -770,6 +797,20 @@ export const PayrollPage: React.FC = () => {
       ),
     },
   ];
+
+  const selectedEmpPreview = getSelectedEmployeePreview();
+  const previewBasic = getSelectedEmployee()?.profile?.basicSalary || selectedEmpPreview?.basicSalary || 0;
+  const previewAllowances = Number(individualPayrollForm.allowances) || 0;
+  const previewOvertimePay = selectedEmpPreview?.overtimePay || 0;
+  const previewOvertimeHours = selectedEmpPreview?.overtimeHours || 0;
+  const previewGrossSalary = previewBasic + previewAllowances + previewOvertimePay;
+  const previewEpf = selectedEmpPreview?.epfEmployee || Math.round(previewBasic * 0.08);
+  const previewEtf = selectedEmpPreview?.etfEmployer || Math.round(previewBasic * 0.03);
+  const previewLoans = selectedEmpPreview?.loanDeductions || 0;
+  const previewAdvances = selectedEmpPreview?.salaryAdvanceDeductions || 0;
+  const previewOtherDeductions = Number(individualPayrollForm.otherDeductions) || 0;
+  const previewTotalDeductions = previewEpf + previewLoans + previewAdvances + previewOtherDeductions;
+  const previewNetSalary = previewGrossSalary - previewTotalDeductions;
 
   return (
     <div className="space-y-6">
@@ -1046,7 +1087,7 @@ export const PayrollPage: React.FC = () => {
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">Basic Salary</label>
                       <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
-                        <span className="font-bold">{selectedEmployee ? formatLKR(getSelectedEmployee()?.profile?.basicSalary || 0) : 'LKR 0'}</span>
+                        <span className="font-bold">{selectedEmployee ? formatLKR(previewBasic) : 'LKR 0'}</span>
                         <span className="text-slate-400">🔒</span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">Auto Filled from Employee Profile</p>
@@ -1066,16 +1107,18 @@ export const PayrollPage: React.FC = () => {
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">Overtime</label>
                       <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
-                        <span className="font-bold">LKR 0</span>
+                        <span className="font-bold">{selectedEmployee ? formatLKR(previewOvertimePay) : 'LKR 0'}</span>
                         <span className="text-slate-400">🔒</span>
                       </div>
-                      <p className="text-xs text-slate-400 mt-1">Auto Calculated from Attendance / Overtime</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {selectedEmployee && previewOvertimeHours > 0 ? `${previewOvertimeHours} hrs - Auto Calculated from Attendance` : 'Auto Calculated from Attendance / Overtime'}
+                      </p>
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">Gross Salary</label>
                       <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
-                        <span className="font-bold">{selectedEmployee ? formatLKR((getSelectedEmployee()?.profile?.basicSalary || 0) + individualPayrollForm.allowances) : 'LKR 0'}</span>
+                        <span className="font-bold">{selectedEmployee ? formatLKR(previewGrossSalary) : 'LKR 0'}</span>
                         <span className="text-slate-400">🔒</span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">Auto Calculated</p>
@@ -1101,7 +1144,7 @@ export const PayrollPage: React.FC = () => {
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">Loan Deduction</label>
                       <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
-                        <span className="font-bold">LKR 0</span>
+                        <span className="font-bold">{selectedEmployee ? formatLKR(previewLoans) : 'LKR 0'}</span>
                         <span className="text-slate-400">🔒</span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">Auto Filled from Active Loan</p>
@@ -1110,7 +1153,7 @@ export const PayrollPage: React.FC = () => {
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">Salary Advance</label>
                       <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
-                        <span className="font-bold">LKR 0</span>
+                        <span className="font-bold">{selectedEmployee ? formatLKR(previewAdvances) : 'LKR 0'}</span>
                         <span className="text-slate-400">🔒</span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">Auto Filled from Approved Advance</p>
@@ -1119,7 +1162,7 @@ export const PayrollPage: React.FC = () => {
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">EPF</label>
                       <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
-                        <span className="font-bold">{selectedEmployee ? formatLKR(Math.round((getSelectedEmployee()?.profile?.basicSalary || 0) * 0.08)) : 'LKR 0'}</span>
+                        <span className="font-bold">{selectedEmployee ? formatLKR(previewEpf) : 'LKR 0'}</span>
                         <span className="text-slate-400">🔒</span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">Auto Calculated</p>
@@ -1128,7 +1171,7 @@ export const PayrollPage: React.FC = () => {
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">ETF</label>
                       <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
-                        <span className="font-bold">{selectedEmployee ? formatLKR(Math.round((getSelectedEmployee()?.profile?.basicSalary || 0) * 0.03)) : 'LKR 0'}</span>
+                        <span className="font-bold">{selectedEmployee ? formatLKR(previewEtf) : 'LKR 0'}</span>
                         <span className="text-slate-400">🔒</span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">Auto Calculated</p>
@@ -1140,12 +1183,7 @@ export const PayrollPage: React.FC = () => {
                   <p className="text-xs font-bold text-slate-700 mb-3">NET SALARY</p>
                   <div className="flex items-center justify-center px-6 py-4 bg-emerald-50 border border-emerald-200 rounded-lg">
                     <span className="text-2xl font-extrabold text-emerald-700">
-                      {selectedEmployee ? formatLKR(
-                        (getSelectedEmployee()?.profile?.basicSalary || 0) + 
-                        individualPayrollForm.allowances - 
-                        Math.round((getSelectedEmployee()?.profile?.basicSalary || 0) * 0.08) - 
-                        individualPayrollForm.otherDeductions
-                      ) : 'LKR 0'}
+                      {selectedEmployee ? formatLKR(previewNetSalary) : 'LKR 0'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1 text-center">🔒 Auto Calculated</p>
@@ -1201,19 +1239,19 @@ export const PayrollPage: React.FC = () => {
                     <div className="space-y-1">
                       <div className="flex justify-between">
                         <span className="text-slate-500">Basic Salary</span>
-                        <span className="font-mono">{selectedEmployee ? formatLKR(getSelectedEmployee()?.profile?.basicSalary || 0) : 'LKR 0'}</span>
+                        <span className="font-mono">{selectedEmployee ? formatLKR(previewBasic) : 'LKR 0'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">Allowances</span>
-                        <span className="font-mono">{formatLKR(individualPayrollForm.allowances)}</span>
+                        <span className="font-mono">{formatLKR(previewAllowances)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">Overtime</span>
-                        <span className="font-mono">LKR 0</span>
+                        <span className="font-mono">{selectedEmployee ? formatLKR(previewOvertimePay) : 'LKR 0'}</span>
                       </div>
                       <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
                         <span className="text-slate-500 font-bold">Gross Salary</span>
-                        <span className="font-bold text-slate-800">{selectedEmployee ? formatLKR((getSelectedEmployee()?.profile?.basicSalary || 0) + individualPayrollForm.allowances) : 'LKR 0'}</span>
+                        <span className="font-bold text-slate-800">{selectedEmployee ? formatLKR(previewGrossSalary) : 'LKR 0'}</span>
                       </div>
                     </div>
                   </div>
@@ -1223,26 +1261,23 @@ export const PayrollPage: React.FC = () => {
                     <div className="space-y-1">
                       <div className="flex justify-between">
                         <span className="text-slate-500">Other</span>
-                        <span className="font-mono">{formatLKR(individualPayrollForm.otherDeductions)}</span>
+                        <span className="font-mono">{formatLKR(previewOtherDeductions)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">Loan</span>
-                        <span className="font-mono">LKR 0</span>
+                        <span className="font-mono">{selectedEmployee ? formatLKR(previewLoans) : 'LKR 0'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">Advance</span>
-                        <span className="font-mono">LKR 0</span>
+                        <span className="font-mono">{selectedEmployee ? formatLKR(previewAdvances) : 'LKR 0'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">EPF</span>
-                        <span className="font-mono">{selectedEmployee ? formatLKR(Math.round((getSelectedEmployee()?.profile?.basicSalary || 0) * 0.08)) : 'LKR 0'}</span>
+                        <span className="font-mono">{selectedEmployee ? formatLKR(previewEpf) : 'LKR 0'}</span>
                       </div>
                       <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
                         <span className="text-slate-500 font-bold">Total Deductions</span>
-                        <span className="font-bold text-slate-800">{selectedEmployee ? formatLKR(
-                          Math.round((getSelectedEmployee()?.profile?.basicSalary || 0) * 0.08) + 
-                          individualPayrollForm.otherDeductions
-                        ) : 'LKR 0'}</span>
+                        <span className="font-bold text-slate-800">{selectedEmployee ? formatLKR(previewTotalDeductions) : 'LKR 0'}</span>
                       </div>
                     </div>
                   </div>
@@ -1253,12 +1288,7 @@ export const PayrollPage: React.FC = () => {
                     </div>
                     <div className="flex justify-between mt-1">
                       <span className="text-slate-500 font-bold">NET SALARY</span>
-                      <span className="font-bold text-emerald-600">{selectedEmployee ? formatLKR(
-                        (getSelectedEmployee()?.profile?.basicSalary || 0) + 
-                        individualPayrollForm.allowances - 
-                        Math.round((getSelectedEmployee()?.profile?.basicSalary || 0) * 0.08) - 
-                        individualPayrollForm.otherDeductions
-                      ) : 'LKR 0'}</span>
+                      <span className="font-bold text-emerald-600">{selectedEmployee ? formatLKR(previewNetSalary) : 'LKR 0'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500 font-bold">══════════════════════════════</span>
@@ -1270,7 +1300,7 @@ export const PayrollPage: React.FC = () => {
                     <div className="space-y-1">
                       <div className="flex justify-between">
                         <span className="text-slate-500">ETF</span>
-                        <span className="font-mono text-blue-600">{selectedEmployee ? formatLKR(Math.round((getSelectedEmployee()?.profile?.basicSalary || 0) * 0.03)) : 'LKR 0'}</span>
+                        <span className="font-mono text-blue-600">{selectedEmployee ? formatLKR(previewEtf) : 'LKR 0'}</span>
                       </div>
                     </div>
                   </div>

@@ -472,9 +472,13 @@ export const createPayroll = async (req, res) => {
     const basic = employee.basicSalary || 50000;
     const allowancesValue = allowances || employee.allowances || 0;
     
+    const targetMonth = parseInt(month);
+    const targetYear = parseInt(year);
+    const settings = await PayrollSettings.findOne({ active: true }) || {};
+
     // Calculate overtime from attendance
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0);
+    const startDate = new Date(targetYear, targetMonth - 1, 1, 0, 0, 0, 0);
+    const endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
     
     const attendanceRecords = await Attendance.find({
       employee: employee._id,
@@ -482,19 +486,21 @@ export const createPayroll = async (req, res) => {
     });
 
     const totalOvertimeHours = attendanceRecords.reduce((sum, record) => sum + (record.overtimeHours || 0), 0);
-    const overtimeRate = (basic / 160) * 1.5;
+    const overtimeRateMultiplier = settings.overtimeRateMultiplier || 1.5;
+    const standardHours = settings.standardWorkingHours || 160;
+    const overtimeRate = (basic / standardHours) * overtimeRateMultiplier;
     const overtimePay = Math.round(totalOvertimeHours * overtimeRate);
 
     const grossSalary = basic + allowancesValue + overtimePay;
 
-    // Sri Lanka Statutory EPF / ETF with consistent rounding
-    const epfEmployeeRate = 0.08; // 8%
-    const epfEmployerRate = 0.12; // 12%
-    const etfEmployerRate = 0.03; // 3%
+    // Sri Lanka Statutory EPF / ETF
+    const epfEmployeeRate = settings.epfEmployeeRate || 8;
+    const epfEmployerRate = settings.epfEmployerRate || 12;
+    const etfEmployerRate = settings.etfEmployerRate || 3;
 
-    const epfEmployee = Math.round((basic * epfEmployeeRate) * 100) / 100;
-    const epfEmployer = Math.round((basic * epfEmployerRate) * 100) / 100;
-    const etfEmployer = Math.round((basic * etfEmployerRate) * 100) / 100;
+    const epfEmployee = Math.round(basic * (epfEmployeeRate / 100));
+    const epfEmployer = Math.round(basic * (epfEmployerRate / 100));
+    const etfEmployer = Math.round(basic * (etfEmployerRate / 100));
 
     // Get approved salary advances if not provided
     let advanceDeductions = salaryAdvanceDeductions || 0;
@@ -745,8 +751,15 @@ export const updatePayrollSettings = async (req, res) => {
 // @route   POST /api/hr/payroll/calculate-preview
 export const calculatePayrollPreview = async (req, res) => {
   try {
-    const { month, year, includeOvertime } = req.body;
-    const employees = await Employee.find({ status: 'active' });
+    const { month, year, includeOvertime, employeeId } = req.body;
+    const targetMonth = parseInt(month);
+    const targetYear = parseInt(year);
+
+    const query = { status: { $ne: 'inactive', $ne: 'terminated' } };
+    if (employeeId) {
+      query._id = employeeId;
+    }
+    const employees = await Employee.find(query).populate('user', 'firstName lastName email role');
     const settings = await PayrollSettings.findOne({ active: true }) || {};
 
     const previewData = {
@@ -766,17 +779,18 @@ export const calculatePayrollPreview = async (req, res) => {
       const allowances = emp.allowances || 0;
       
       // Calculate overtime from attendance
+      let totalOvertimeHours = 0;
       let overtimePay = 0;
-      if (includeOvertime) {
-        const startDate = new Date(year, month - 1, 1);
-        const endDate = new Date(year, month, 0);
+      if (includeOvertime !== false) {
+        const startDate = new Date(targetYear, targetMonth - 1, 1, 0, 0, 0, 0);
+        const endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
         
         const attendanceRecords = await Attendance.find({
           employee: emp._id,
           date: { $gte: startDate, $lte: endDate },
         });
 
-        const totalOvertimeHours = attendanceRecords.reduce((sum, record) => sum + (record.overtimeHours || 0), 0);
+        totalOvertimeHours = attendanceRecords.reduce((sum, record) => sum + (record.overtimeHours || 0), 0);
         const overtimeRateMultiplier = settings.overtimeRateMultiplier || 1.5;
         const standardHours = settings.standardWorkingHours || 160;
         const overtimeRate = (basic / standardHours) * overtimeRateMultiplier;
@@ -825,10 +839,13 @@ export const calculatePayrollPreview = async (req, res) => {
       previewData.estimatedNetPayroll += netSalary;
 
       previewData.employees.push({
+        _id: emp._id,
         employeeId: emp.employeeId || emp.managerId,
-        name: `${emp.user?.firstName} ${emp.user?.lastName}`,
+        name: `${emp.user?.firstName || ''} ${emp.user?.lastName || ''}`.trim(),
+        employeeName: `${emp.user?.firstName || ''} ${emp.user?.lastName || ''}`.trim(),
         basicSalary: basic,
         allowances,
+        overtimeHours: totalOvertimeHours,
         overtimePay,
         grossSalary,
         epfEmployee,
